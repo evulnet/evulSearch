@@ -46,6 +46,9 @@ function applyZoom() {
     ? Number(settings.ui_scale) : 100;
   const eff = window.matchMedia(MOBILE_Q).matches ? s * 0.75 : s;
   document.documentElement.style.zoom = String(eff / 100);
+  // Layout height = calc(100dvh / --eff-scale): vh units get scaled by zoom,
+  // so divide the effective factor back out or the shell overflows.
+  document.documentElement.style.setProperty("--eff-scale", String(eff / 100));
 }
 applyZoom();
 try {

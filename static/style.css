@@ -35,15 +35,28 @@
 
 * { box-sizing: border-box; }
 
+html { height: 100%; }
+
+/* Rigid app shell: the page itself never scrolls on any device. Only
+   #results (and the settings sheet) scroll vertically; horizontal scroll
+   is dead everywhere. --eff-scale mirrors the JS zoom factor (see
+   applyZoom) so calc() heights divide it back out — vh units are scaled
+   by zoom in Chrome, which would otherwise overflow at ui_scale > 100,
+   and the calc(100dvh/…) form keeps the layout glued through Safari's
+   collapsing URL bar. */
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--fg);
-  min-height: 100vh;
+  height: calc(100dvh / var(--eff-scale, 1));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 header {
+  flex: none;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -65,10 +78,26 @@ header {
 .icon-btn:hover { background: var(--border); }
 
 main {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
   max-width: 720px;
   margin: 0 auto;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
+
+/* fixed chrome inside main: only #results scrolls */
+#tabs, #engines, .subopts, #search-form, #status { flex: none; }
+.workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+#results { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
 #search-form {
   display: flex;
@@ -254,6 +283,7 @@ main {
 .subopts input:focus { outline: 2px solid var(--accent); border-color: transparent; }
 
 .mapbox {
+  flex: none;
   height: 320px;
   margin: 8px 0;
   border: 1px solid var(--border);
@@ -334,18 +364,17 @@ main {
   main.places-mode .workspace {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas: "map status" "map results";
     gap: 0 20px;
-    align-items: start;
+    align-items: stretch;
   }
   main.places-mode #status   { grid-area: status; }
   main.places-mode #map      { grid-area: map; }
-  main.places-mode #results  { grid-area: results; }
+  main.places-mode #results  { grid-area: results; overflow-y: auto; }
   main.places-mode .mapbox {
-    height: calc(100vh - 150px);
-    min-height: 420px;
-    position: sticky;
-    top: 64px;
+    height: 100%;
+    grid-row: 1 / 3;   /* sticky is pointless now: the page never scrolls */
   }
 
   /* Bigger image tiles on desktop */

@@ -573,3 +573,44 @@ def test_answers_local_backend_pills(page, app_server):
     expect(page.locator('#engines button[data-engine="local"]'))\
         .to_have_class(re.compile("active"))  # per-user choice persists
 
+
+
+def test_rigid_shell_page_never_scrolls(browser, app_server):
+    # The page itself must never scroll (any viewport); only #results does.
+    for vw, vh, scale in ((1280, 720, 100), (390, 844, 75), (1280, 720, 150)):
+        ctx = browser.new_context(viewport={"width": vw, "height": vh})
+        page = ctx.new_page()
+        if scale != 100:
+            page.add_init_script(
+                "localStorage.setItem('settings', JSON.stringify("
+                f"{{ui_scale: {scale}}}));")
+        page.goto(app_server + "/")
+        page.fill("#q", "hello")
+        page.press("#q", "Enter")
+        expect(page.locator("#results li").first).to_be_visible()
+        se = page.evaluate("document.scrollingElement.scrollHeight")
+        ch = page.evaluate("document.scrollingElement.clientHeight")
+        assert se <= ch + 1, f"page scrolls at {vw}x{vh}: {se} > {ch}"
+        # wheel over results must not pan the page
+        page.mouse.move(vw // 2, vh - 50)
+        page.mouse.wheel(0, 600)
+        assert page.evaluate("window.scrollY") == 0
+        # …and #results is the designated scroller: when content overflows
+        # it scrolls for real; otherwise the overflow rule must be armed
+        r = page.locator("#results")
+        over = r.evaluate("el => el.scrollHeight > el.clientHeight")
+        if over:
+            r.evaluate("el => el.scrollTop = 500")
+            assert r.evaluate("el => el.scrollTop") > 0
+        else:
+            assert r.evaluate(
+                "el => getComputedStyle(el).overflowY") == "auto"
+            # force overflow via tall content to prove the box can scroll
+            r.evaluate("el => { const li = document.createElement('li');"
+                       " li.style.height = '3000px'; li.id = 'tall-probe';"
+                       " el.append(li); el.scrollTop = 500; }")
+            assert r.evaluate("el => el.scrollTop") > 0
+            page.evaluate("document.getElementById('tall-probe').remove()")
+        # chrome stays pinned: tabs visible after max results scroll
+        assert page.locator("#tabs").is_visible()
+        ctx.close()
