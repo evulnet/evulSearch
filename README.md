@@ -1,10 +1,36 @@
 # evulSearch
 
-A small, privacy-focused self-hosted search service. One Flask process proxies your
-queries to the Brave Search API so your Brave keys never touch the browser.
+A small, privacy-focused self-hosted search service. One Flask process proxies
+your queries through a **pluggable engine registry** — Brave's native API and/or
+Google & Bing via the **Bright Data SERP API** — so your API keys never touch
+the browser. Add the keys you have; evulSearch shows exactly what your backends
+can do and nothing more.
+
 No cookies, no analytics. Results are cached server-side for faster repeat
 searches (configurable, off-switch available). Designed to run on a private
 network (for example behind WireGuard) and never be publicly exposed.
+
+## Engines
+
+Backends are modules, not conditionals: every engine registers which query
+types it can serve, and the UI is generated from that — engine pills appear
+per tab only when your configured keys make a real choice possible, and tabs
+no backend can serve hide themselves. **More backend APIs will follow**; an
+engine is a capability line plus a URL builder and a mapper, and adding one
+means touching none of the others.
+
+| Engine | Backend | Web | News | Images | Places | Answers |
+|---|---|---|---|---|---|---|
+| Brave | native Search API | ✅ | ✅ | ✅ | ✅ | ✅ (own key) |
+| Google | Bright Data SERP | ✅ | ✅ | ✅ | ✅* | – |
+| Bing | Bright Data SERP | ✅ | – | – | – | – |
+| Local | any OpenAI-compliant /v1 | – | – | – | – | ✅ |
+
+\* Google Places arrive without coordinates, so the embedded map stays empty
+for that engine (results still link out to Google Maps).
+
+Bright Data's SERP API has a free tier (as of 10/2026) alongside Brave's free
+quota — you can run the whole multi-engine stack for nothing to try it out.
 
 ## Features
 
@@ -48,16 +74,12 @@ network (for example behind WireGuard) and never be publicly exposed.
 - Desktop (≥900px): Places uses a split view — sticky map on the left,
   listings on the right; image tiles are larger; the lightbox uses ~90% of the
   viewport with edge-mounted arrows. Phones keep the single-column layout.
-- **Pluggable search engines.** Results come from whichever backends your
-  keys configure: Brave native API (Web/News/Images/Places/Answers), or
-  Google (Web/News/Images/Places) and Bing (Web) via the Bright Data SERP API.
-  Users see engine pills on a tab only when more than one configured engine supports
-  it; tabs nobody can serve hide themselves. Engine choice is per-user and
-  deep-linkable. Google Images grids hotlink originals (no thumbnail URLs in
-  the SERP payload) and Google Places lack map pins (Google's local pack
-  exposes no coordinates) and link out via Google Maps instead. First Google
-  Images/Places hits are slow (~30–90 s live scrape); the query cache makes
-  repeats instant.
+- **Pluggable search engines** — see [Engines](#engines) above. Engine choice
+  is per-user (localStorage), deep-linkable (`&engine=`), and gracefully
+  falls back when an engine can't serve the current tab. Google Images grids
+  hotlink originals (no thumbnail URLs in the SERP payload); Google Places
+  link out via Google Maps. First Google Images/Places hits are slow
+  (~30–90 s live scrape); the query cache makes repeats instant.
 - Server capabilities drive the UI: with no answers key the Answers tab and its
   settings hide themselves; without `allow_map_embed` the embedded-map option is
   hidden too (not just greyed out).

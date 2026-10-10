@@ -17,6 +17,9 @@ Format: latest first; sections `Added / Changed / Fixed`.
   answer and Places text — the page may wrap, but never scrolls sideways.
 
 ### Changed
+- README leads with an `Engines` section: Bright Data SERP featured as a
+  first-class backend alongside Brave, capability table, and an explicit
+  "more backend APIs will follow" roadmap note (the registry is the point).
 - Mobile (viewport < 900px) renders at the equivalent of the 75% UI scale:
   a 0.75 multiplier composes with the user's `ui_scale` setting (so a
   phone user at 125% sees 93.75%). Desktop is unchanged. Tab bar padding
