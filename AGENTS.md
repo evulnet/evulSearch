@@ -187,6 +187,12 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
 - Repo **public**; account `nkavassalis`; single-maintainer flow: direct push to `main` after full green suite (no branch-and-PR).
 - Bright Data SERP path is LIVE-VERIFIED end-to-end (configured zone):
   Google web/news/places and Bing web all returned real results through the
-  proxy. Safe-search `off`/`strict` flags for Google/Bing are unit-verified
+  proxy. SerpApi and SearXNG providers exist and are MOCK-verified only —
+  live checks await the user's SERPAPI_KEY / a SEARXNG instance (SerpApi shapes
+  implemented from docs: organic_results/news_results/inline_images (full-res
+  URL rides in `thumbnail`)/places(location_info.coordinates); SearXNG 403 =
+  json format disabled). Bright Data Places carry NO coordinates (verified
+  live) — SerpApi/Brave enable the map, BrightData cannot; the frontend map is
+  provider-agnostic (renders on coordinates presence). Safe-search `off`/`strict` flags for Google/Bing are unit-verified
   only (URL construction). Not verified: Bing freshness (unmapped by design),
   Bing market/locale defaults (returned US-flavored results from this host).

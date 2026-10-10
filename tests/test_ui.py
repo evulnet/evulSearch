@@ -475,42 +475,73 @@ def test_ui_scale(page, app_server):
     expect(page.locator("#ui_scale")).to_have_value("125")  # persisted + restored
 
 
-def test_engine_switch(page, app_server):
-    # UI test server has Brave + BrightData keys -> Google/Bing become options
+def test_engine_switch(browser, app_server):
+    # UI server configures Brave + BrightData + SerpApi + SearXNG + Local.
+    # Providers merge under engine ids: web pills are Brave/Google/Bing/SearXNG.
+    ctx = browser.new_context()
+    ctx.add_init_script(FAKE_LEAFLET)  # serpapi places carry coordinates -> map renders
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(e))
     page.goto(app_server + "/")
     expect(page.locator("#engines")).to_be_visible()
-    expect(page.locator("#engines button")).to_have_count(3)
-    expect(page.locator('#engines button[data-engine="brave"]'))\
-        .to_have_class(re.compile("active"))
+    expect(page.locator("#engines button")).to_have_count(4)
 
+    # Google pill is served by SerpApi (best-first provider order)
     page.click('#engines button[data-engine="google"]')
     page.fill("#q", "hello")
     page.press("#q", "Enter")
-    expect(page.locator("#results li").first).to_contain_text("BD result for hello")
+    expect(page.locator("#results li").first).to_contain_text("SerpApi result for hello")
     expect(page.locator("#results li")).to_have_count(2)
 
-    # News: Bing drops out (web-only), Google still offered and used
+    # News: SerpApi google_news; Bing drops out, SearXNG joins
     page.click('#tabs button[data-tab="news"]')
-    expect(page.locator("#engines button")).to_have_count(2)
+    expect(page.locator("#engines button")).to_have_count(3)
     page.press("#q", "Enter")
-    expect(page.locator("#results li").first).to_contain_text("BD news for hello")
+    expect(page.locator("#results li").first).to_contain_text("SerpApi news for hello")
 
-    # Places: Brave + Google both serve it -> pills again, BD places render
+    # Places: Brave + Google(SerpApi) -> real coordinates -> map + pins
     page.click('#tabs button[data-tab="places"]')
     expect(page.locator("#engines button")).to_have_count(2)
     page.press("#q", "Enter")
-    expect(page.locator("#results li.place").first).to_contain_text("BD place for hello")
+    expect(page.locator("#results li.place").first).to_contain_text("SerpApi place for hello")
+    expect(page.locator("#map")).to_be_visible()
+    assert page.evaluate("window.__fakeL.markers") >= 1
 
-    # Images: Google now serves it too -> pills stay, BD images render
+    # Images: Brave + Google + SearXNG
     page.click('#tabs button[data-tab="images"]')
-    expect(page.locator("#engines button")).to_have_count(2)
-    page.press("#q", "Enter")
-    expect(page.locator("#results li a[data-lightbox]").first).to_be_visible()
+    expect(page.locator("#engines button")).to_have_count(3)
 
-    # choice persists across reload (per user, in localStorage)
-    page.reload()
+    # SearXNG pill: self-hosted metasearch, web/news/images
+    page.click('#tabs button[data-tab="web"]')
+    page.click('#engines button[data-engine="searxng"]')
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_contain_text("SearXNG result for hello")
+    assert not errors
+    ctx.close()
+
+
+def test_deep_link_engine(page, app_server):
+    page.goto(app_server + "/?q=hello&tab=web&engine=google")
+    # URL engine is honored for this search without overwriting stored prefs
+    expect(page.locator("#results li").first).to_contain_text("SerpApi result for hello")
     expect(page.locator('#engines button[data-engine="google"]'))\
         .to_have_class(re.compile("active"))
+    page.goto(app_server + "/")
+    expect(page.locator('#engines button[data-engine="brave"]'))\
+        .to_have_class(re.compile("active"))  # setting never persisted
+
+
+def test_ui_scale(page, app_server):
+    page.goto(app_server + "/")
+    assert page.evaluate("document.documentElement.style.zoom") == "1"  # default
+    page.click("#gear")
+    page.select_option("#ui_scale", "125")
+    assert page.evaluate("document.documentElement.style.zoom") == "1.25"
+    page.reload()
+    page.click("#gear")
+    assert page.evaluate("document.documentElement.style.zoom") == "1.25"
+    expect(page.locator("#ui_scale")).to_have_value("125")  # persisted + restored
 
 
 def test_answers_local_backend_pills(page, app_server):
@@ -532,13 +563,3 @@ def test_answers_local_backend_pills(page, app_server):
     expect(page.locator('#engines button[data-engine="local"]'))\
         .to_have_class(re.compile("active"))  # per-user choice persists
 
-
-def test_deep_link_engine(page, app_server):
-    page.goto(app_server + "/?q=hello&tab=web&engine=google")
-    # URL engine is honored for this search without overwriting stored prefs
-    expect(page.locator("#results li").first).to_contain_text("BD result for hello")
-    expect(page.locator('#engines button[data-engine="google"]'))\
-        .to_have_class(re.compile("active"))
-    page.goto(app_server + "/")
-    expect(page.locator('#engines button[data-engine="brave"]'))\
-        .to_have_class(re.compile("active"))  # setting never persisted

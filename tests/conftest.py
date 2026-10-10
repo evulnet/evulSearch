@@ -79,6 +79,58 @@ def make_mock_brave():
         return jsonify(choices=[{"message": {"role": "assistant",
                                 "content": f"Local answer for {q}: 42."}}])
 
+    @app.get("/serpapi/search.json")
+    def serpapi():
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(request.full_path).query)
+        assert qs.get("api_key", [""])[0] == "MOCK-SERPAPI-KEY"
+        q = qs.get("q", [""])[0]
+        eng = qs.get("engine", [""])[0]
+        if eng == "google_news":
+            return jsonify(news_results=[
+                {"title": f"SerpApi news for {q}", "link": "https://sp.example/n1",
+                 "snippet": "sn", "source": "sp.example", "date": "1 hour ago"}])
+        if eng == "google_images":
+            return jsonify(inline_images=[
+                {"title": f"SerpApi image {q}", "link": "https://sp.example/p1",
+                 "thumbnail": "https://sp.example/i1.jpg", "source": "sp.example"}])
+        if eng == "google_locations":
+            return jsonify(places=[
+                {"title": f"SerpApi place for {q}", "address": "1 Osaka road",
+                 "website": "https://sp.example",
+                 "phone": "+81 00-0000", "rating": 4.4, "reviews": 240,
+                 "type": "sushi",
+                 "location_info": {"coordinates": {"latitude": 34.7,
+                                                    "longitude": 135.5}}}])
+        if eng == "duckduckgo":
+            return jsonify(organic_results=[])
+        return jsonify(organic_results=[
+            {"title": f"SerpApi result for {q}", "link": "https://sp.example/1",
+             "snippet": "serp &amp; one", "displayed_link": "sp.example"},
+            {"title": "Second SerpApi result", "link": "https://sp.example/2",
+             "snippet": "serp two"},
+        ])
+
+    @app.get("/searxng/search")
+    def searxng():
+        if request.args.get("format") != "json":
+            return "json disabled", 403
+        q = request.args.get("q", "")
+        cat = request.args.get("categories", "general")
+        if cat == "news":
+            return jsonify(results=[
+                {"title": f"SearXNG news for {q}", "url": "https://sx.example/n1",
+                 "content": "sx news", "published_date": "2026-10-10"}])
+        if cat == "images":
+            return jsonify(results=[
+                {"title": f"SearXNG image {q}", "url": "https://sx.example/page1",
+                 "img_src": "https://sx.example/i1.jpg",
+                 "thumbnail": "https://sx.example/t1.jpg"}])
+        return jsonify(results=[
+            {"title": f"SearXNG result for {q}", "url": "https://sx.example/1",
+             "content": "sx &amp; snippet"},
+        ])
+
     @app.post("/request")
     def bd_request():
         from urllib.parse import urlparse, parse_qs
@@ -206,6 +258,9 @@ def app_server(mock_brave, tmp_path_factory):
         "BRIGHTDATA_SERP_API_KEY": "MOCK-BD-KEY",
         "BRIGHTDATA_SERP_ZONE": "testzone",
         "BRIGHTDATA_API_URL": mock_brave.removesuffix("/res/v1") + "/request",
+        "SERPAPI_KEY": "MOCK-SERPAPI-KEY",
+        "SERPAPI_SEARCH_URL": mock_brave.removesuffix("/res/v1") + "/serpapi/search.json",
+        "SEARXNG_URL": mock_brave.removesuffix("/res/v1") + "/searxng",
         "LOCAL_CHAT_BASE_URL": mock_brave.removesuffix("/res/v1") + "/v1",
         "EVUL_CONFIG_PATH": str(cfg),
         "HOST": "127.0.0.1",

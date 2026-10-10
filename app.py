@@ -164,13 +164,45 @@ BD_GOOGLE_TBS = {"day": "qdr:d", "week": "qdr:w", "month": "qdr:m", "year": "qdr
 BD_CAPS = {"google": ["web", "news", "images", "places"], "bing": ["web"]}
 BRAVE_CAPS = ["web", "news", "images", "places", "answers"]
 
+# SerpApi: the "OpenAI of SERP" idea; richer Places (coordinates, phones,
+# opening hours) than Bright Data's lcl scrape, so it wins the Google pill
+# when both are configured. Google only for now — SerpApi's Bing shapes are
+# unmapped here, so we do not advertise them.
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
+# URL overridable so tests can point at the mock server.
+SERPAPI_URL = os.environ.get("SERPAPI_SEARCH_URL", "https://serpapi.com/search.json")
+SERPAPI_CAPS = {"google": ["web", "news", "images", "places"]}
+
+# SearXNG: self-hosted metasearch (no vendor, no quota). JSON API must be
+# enabled in its settings.yml (search.formats: [json]). No Places support.
+SEARXNG_URL = os.environ.get("SEARXNG_URL", "").rstrip("/")
+SEARX_CAPS = ["web", "news", "images"]
+
 def engines_available():
     e = []
     if API_KEY:
         e.append({"id": "brave", "tabs": BRAVE_CAPS})
-    if BD_KEY and BD_ZONE:  # zone is mandatory in the BrightData payload
-        e.extend({"id": eng, "tabs": BD_CAPS[eng]} for eng in BD_ENGINES)
+    # Engine ids (google/bing) can be served by more than one provider;
+    # the UI sees ONE engine per id with the union of provider capabilities.
+    for eng in BD_ENGINES:
+        tabs = []
+        for prov, caps in engine_providers(eng):
+            tabs += [t for t in caps if t not in tabs]
+        if tabs:
+            e.append({"id": eng, "tabs": tabs})
+    if SEARXNG_URL:
+        e.append({"id": "searxng", "tabs": list(SEARX_CAPS), "label": "SearXNG"})
     return e
+
+
+def engine_providers(engine):
+    """Configured providers for an engine id, best-first."""
+    p = []
+    if SERPAPI_KEY and engine in SERPAPI_CAPS:
+        p.append(("serpapi", SERPAPI_CAPS[engine]))
+    if BD_KEY and BD_ZONE and engine in BD_CAPS:
+        p.append(("brightdata", BD_CAPS[engine]))
+    return p
 PORT = int(os.environ.get("PORT", 5000))
 HOST = os.environ.get("HOST", "127.0.0.1")
 
@@ -376,6 +408,154 @@ def _bd_map(items, tab):
     return out
 
 
+def _serpapi_search(query, engine, tab, count, safesearch, freshness):
+    """Results via SerpApi. Returns (items, error); one is non-None."""
+    serp_engine = {"web": f"{engine}", "news": "google_news" if engine == "google" else f"{engine}_news",
+                   "images": "google_images", "places": "google_locations"}[tab]
+    if engine == "bing" and tab != "web":
+        return None, "SerpApi Bing supports the Web tab only."
+    params = {"engine": serp_engine, "q": query, "api_key": SERPAPI_KEY,
+              "hl": "en", "gl": "us", "num": min(count, 20)}
+    if safesearch == "strict":
+        params["safe"] = "active"
+    elif safesearch == "off":
+        params["safe"] = "off"
+    if freshness in ("day", "week", "month", "year") and tab in ("web", "news"):
+        params["tbs"] = {"day": "qdr:d", "week": "qdr:w",
+                         "month": "qdr:m", "year": "qdr:y"}[freshness]
+    try:
+        resp = requests.get(SERPAPI_URL, params=params, timeout=60)
+    except requests.RequestException:
+        return None, "Could not reach SerpApi."
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {}
+    if resp.status_code != 200:
+        # SerpApi error bodies can quote the request; relay only the status.
+        return None, f"SerpApi error (HTTP {resp.status_code})."
+    key = {"web": "organic_results", "news": "news_results",
+           "images": "inline_images", "places": "places"}[tab]
+    items = data.get(key) or []
+    if tab == "news" and not items:  # google_news also uses organic_results
+        items = data.get("organic_results") or []
+    return items[:count], None
+
+
+def _serpapi_map(items, tab):
+    """SerpApi items -> our normalized shapes (web/news/images/places)."""
+    out = []
+    for it in items:
+        if tab == "places":
+            name = html.unescape(it.get("title") or "")
+            if not name:
+                continue
+            info = it.get("location_info") or {}
+            coords = info.get("coordinates") or {}
+            lat, lon = coords.get("latitude"), coords.get("longitude")
+            bits = []
+            if it.get("rating"):
+                bits.append(f"{it['rating']}\u2605")
+            if it.get("reviews"):
+                bits.append(f"{it['reviews']} reviews")
+            hours = it.get("opening_hours") or {}
+            if isinstance(hours, dict) and hours.get("today"):
+                bits.append(str(hours["today"]))
+            out.append({
+                "title": name,
+                "url": it.get("website") or "",
+                "address": html.unescape(it.get("address") or ""),
+                "phone": it.get("phone") or "",
+                "coordinates": [lat, lon] if lat is not None and lon is not None else [],
+                "categories": html.unescape(it.get("type") or ""),
+                "opening": " \u00b7 ".join(bits),
+                "description": "",
+                "img": it.get("thumbnail") or "",
+            })
+            continue
+        link = it.get("link") or it.get("url") or ""
+        if not link:
+            continue
+        src = it.get("source") or it.get("displayed_link") or ""
+        src = str(src)
+        if " " in src or "\u203a" in src or "\u00bb" in src:
+            src = urlparse(link).netloc
+        row = {
+            "title": html.unescape(it.get("title") or ""),
+            "url": link,
+            "description": html.unescape(it.get("snippet") or it.get("description") or ""),
+            "age": it.get("date") or it.get("new_date") or it.get("published_date") or "",
+            "source": src or urlparse(link).netloc,
+        }
+        if tab == "images":
+            # SerpApi's inline_images carry the full-res URL in `thumbnail`
+            # (their docs' quirk); verify live and adjust if shapes change.
+            origin = (it.get("thumbnail_large") or it.get("original")
+                      or it.get("thumbnail") or link)
+            row = {
+                "title": html.unescape(it.get("title") or it.get("title_source") or ""),
+                "url": link, "source": row["source"],
+                "thumb": it.get("thumbnail") or origin,
+                "origin": origin,
+            }
+        out.append(row)
+    return out
+
+
+SEARX_TBS = {"day": "day", "week": "week", "month": "month", "year": "year"}
+
+
+def _searx_search(query, tab, count, safesearch, freshness):
+    """Results from a self-hosted SearXNG (JSON API). (items, error)."""
+    cats = {"web": "general", "news": "news", "images": "images"}[tab]
+    params = {"q": query, "format": "json", "categories": cats, "pageno": 1,
+              "safesearch": {"off": 0, "moderate": 1, "strict": 2}[safesearch]}
+    if freshness in SEARX_TBS:
+        params["time_range"] = SEARX_TBS[freshness]
+    try:
+        resp = requests.get(SEARXNG_URL + "/search", params=params,
+                            headers={"Accept": "application/json"}, timeout=30)
+    except requests.RequestException:
+        return None, "Could not reach SearXNG."
+    if resp.status_code == 403:
+        return None, ("SearXNG refused JSON (enable formats: [json] "
+                      "in its settings.yml).")
+    if resp.status_code != 200:
+        return None, f"SearXNG error (HTTP {resp.status_code})."
+    try:
+        data = resp.json()
+    except ValueError:
+        return None, "Bad response from SearXNG."
+    return (data.get("results") or [])[:count], None
+
+
+def _searx_map(items, tab):
+    out = []
+    for it in items:
+        link = it.get("url") or ""
+        if not link:
+            continue
+        if tab == "images":
+            origin = it.get("img_src") or ""
+            if not origin:
+                continue
+            out.append({
+                "title": html.unescape(it.get("title") or ""),
+                "url": link, "source": urlparse(link).netloc,
+                "thumb": it.get("thumbnail") or origin,
+                "origin": origin,
+            })
+            continue
+        out.append({
+            "title": html.unescape(it.get("title") or ""),
+            "url": link,
+            "description": html.unescape(it.get("content") or ""),
+            "age": it.get("published_date") or "",
+            "source": it.get("source") or urlparse(link).netloc,
+        })
+    return out
+
+
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
@@ -387,7 +567,7 @@ def search():
         return jsonify(error="Server is missing BRAVE_API_KEY (and Bright Data keys)."), 500
 
     engine = request.args.get("engine", "brave")
-    if engine not in ("brave",) + BD_ENGINES:
+    if engine not in ("brave", "searxng") + BD_ENGINES:
         engine = "brave"
     if engine == "brave" and not API_KEY:
         return jsonify(error="Server is missing BRAVE_API_KEY."), 500
@@ -439,27 +619,57 @@ def search():
     if freshness:
         params["freshness"] = freshness
 
-    ckey = cache_key("search", sorted(params.items()) + [("engine", engine)])
+    freshness_raw = request.args.get("freshness", "")
+
+    # Resolve the concrete provider for (engine, tab) before cache lookup so
+    # the cache key can carry it (same engine, different provider = different
+    # data shape; never mix them in one entry).
+    if engine == "brave":
+        provider = "brave"
+    elif engine == "searxng":
+        if not SEARXNG_URL:
+            return jsonify(error="SearXNG is not configured on this server."), 503
+        if tab not in SEARX_CAPS:
+            return jsonify(error="SearXNG does not support the "
+                                 f"{tab.capitalize()} tab."), 400
+        provider = "searxng"
+    else:
+        provs = engine_providers(engine)
+        if not provs:
+            return jsonify(error=f"{engine.capitalize()} is not configured on this server."), 503
+        provider = next((p for p, caps in provs if tab in caps), None)
+        if provider is None:
+            return jsonify(error=f"{engine.capitalize()} via the configured providers "
+                                 f"does not support the {tab.capitalize()} tab."), 400
+
+    ckey = cache_key("search", sorted(params.items())
+                     + [("engine", engine), ("provider", provider)])
     hours = cache_hours_for(tab)
     hit = cache_get(ckey, hours)
     if hit is not None:
         return jsonify({**hit, "cached": True})
 
-    if engine in BD_ENGINES:
-        if tab not in BD_CAPS[engine]:
-            return jsonify(error=f"{engine.capitalize()} via Bright Data does not support the "
-                                 f"{tab.capitalize()} tab."), 400
-        if not (BD_KEY and BD_ZONE):
-            return jsonify(error="Google/Bing are not configured on this server."), 503
-        # Places loc override mutates params["q"] upstream; honor it for BD too.
+    if provider != "brave":
+        # Places loc override mutates params["q"] upstream; honor it for all providers.
         qparam = params.get("q", query)
-        items, err = _brightdata_serp(qparam, engine, tab, count, safesearch,
-                                      request.args.get("freshness", ""))
+        if provider == "serpapi":
+            items, err = _serpapi_search(qparam, engine, tab, count, safesearch, freshness_raw)
+        elif provider == "searxng":
+            items, err = _searx_search(qparam, tab, count, safesearch, freshness_raw)
+        else:
+            items, err = _brightdata_serp(qparam, engine, tab, count, safesearch, freshness_raw)
         if err:
             return jsonify(error=err), 502
-        results = (_bd_map_places(items) if tab == "places"
-                   else _bd_map_images(items) if tab == "images"
-                   else _bd_map(items, tab))
+        if provider == "serpapi":
+            results = _serpapi_map(items, tab)
+        elif provider == "searxng":
+            results = _searx_map(items, tab)
+        elif tab == "places":
+            results = _bd_map_places(items)
+        elif tab == "images":
+            results = _bd_map_images(items)
+        else:
+            results = _bd_map(items, tab)
         payload = {"results": results, "tab": tab, "engine": engine}
         cache_set(ckey, payload, hours)
         return jsonify(payload)

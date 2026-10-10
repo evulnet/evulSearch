@@ -22,15 +22,19 @@ means touching none of the others.
 | Engine | Backend | Web | News | Images | Places | Answers |
 |---|---|---|---|---|---|---|
 | Brave | native Search API | ✅ | ✅ | ✅ | ✅ | ✅ (own key) |
-| Google | Bright Data SERP | ✅ | ✅ | ✅ | ✅* | – |
+| Google | SerpApi and/or Bright Data SERP† | ✅ | ✅ | ✅ | ✅ | – |
 | Bing | Bright Data SERP | ✅ | – | – | – | – |
+| SearXNG | your own SearXNG instance | ✅ | ✅ | ✅ | – | – |
 | Local | any OpenAI-compliant /v1 | – | – | – | – | ✅ |
 
-\* Google Places arrive without coordinates, so the embedded map stays empty
-for that engine (results still link out to Google Maps).
+† Providers are priority-listed per engine: **SerpApi first** (richer payloads),
+Bright Data as fallback. One “Google” pill, best available data. The embedded
+map renders for **any** engine whose Places results carry coordinates — Brave
+and SerpApi yes, Bright Data's local-pack scrape no.
 
-Bright Data's SERP API has a free tier (as of 10/2026) alongside Brave's free
-quota — you can run the whole multi-engine stack for nothing to try it out.
+SerpApi (~100 free searches/month) and SearXNG (self-hosted, free forever) join
+Bright Data and Brave in the “you can try everything for nothing” club —
+check current pricing at each vendor.
 
 ## Features
 
@@ -134,10 +138,12 @@ cp .env.example .env        # then edit .env
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `BRAVE_API_KEY` | recommended | Web/News/Images/Places Search API + Brave Answers. Optional only if Bright Data covers your needs |
+| `BRAVE_API_KEY` | recommended | Web/News/Images/Places Search API + Brave Answers. Optional only if other engines cover your needs |
 | `BRAVE_ANSWERS_KEY` | no | Answers (separate Brave product; tab hides when unset) |
 | `BRIGHTDATA_SERP_API_KEY` | no | Google (Web/News/Images/Places) + Bing (Web) engines via Bright Data SERP |
 | `BRIGHTDATA_SERP_ZONE` | with BD key | Your Bright Data zone name (required by the API) |
+| `SERPAPI_KEY` | no | SerpApi provider for the Google pill (web/news/images/**places-with-map-pins**); takes priority over BrightData |
+| `SEARXNG_URL` | no | Base URL of a self-hosted SearXNG (web/news/images); its settings.yml must allow `formats: [json]` |
 | `LOCAL_CHAT_BASE_URL` | no | OpenAI-compliant answers server, e.g. `http://127.0.0.1:8000/v1` (enables the “Local” answers pill) |
 | `LOCAL_CHAT_API_KEY` | no | Bearer token, only sent if set (many local servers need none) |
 | `LOCAL_CHAT_MODEL` | no | Pin a model id; default is auto-detect via `GET /models` |

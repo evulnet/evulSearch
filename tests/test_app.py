@@ -635,3 +635,87 @@ def test_favicon_png_served(client):
                  "/static/apple-touch-icon.png"):
         r = client.get(path)
         assert r.status_code == 200 and r.content_type == "image/png", path
+
+
+def _serp_env(monkeypatch):
+    monkeypatch.setattr(appmod, "SERPAPI_KEY", "sk")
+    monkeypatch.setattr(appmod, "SERPAPI_URL", "https://sp.test/search.json")
+    monkeypatch.setattr(appmod, "BD_KEY", "")
+    monkeypatch.setattr(appmod, "BD_ZONE", "")
+
+
+def test_serpapi_web_priority_and_mapping(client, monkeypatch):
+    _serp_env(monkeypatch)
+    monkeypatch.setattr(appmod, "BD_KEY", "bk")  # BD also configured...
+    monkeypatch.setattr(appmod, "BD_ZONE", "bz")
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+    calls = patch_get(monkeypatch, FakeResp(payload={"organic_results": [
+        {"title": "S &amp; T", "link": "https://a.example/1",
+         "snippet": "sn", "displayed_link": "a.example"},
+    ]}))
+    posts = _patch_post(monkeypatch, {"organic": []})  # BD must NOT be used
+    body = client.get("/api/search?q=x&engine=google").get_json()
+    assert body["results"][0]["title"] == "S & T"
+    assert calls["url"] == "https://sp.test/search.json"   # SerpApi wins
+    assert "url" not in posts                              # BrightData untouched
+    assert body["results"][0]["source"] == "a.example"
+
+
+def test_serpapi_places_coordinates_enable_map(client, monkeypatch):
+    _serp_env(monkeypatch)
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+    _patch_post(monkeypatch, {"organic": []})
+    patch_get(monkeypatch, FakeResp(payload={"places": [
+        {"title": "Osaka sushi", "address": "1 street", "website": "https://w.example",
+         "phone": "123", "rating": 4.4, "type": "sushi",
+         "location_info": {"coordinates": {"latitude": 34.7, "longitude": 135.5}}},
+    ]}))
+    body = client.get("/api/search?q=sushi&engine=google&tab=places").get_json()
+    r0 = body["results"][0]
+    assert r0["coordinates"] == [34.7, 135.5]  # map pins work like Brave
+    assert r0["url"] == "https://w.example"
+
+
+def test_searxng_mapping_and_guards(client, monkeypatch):
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "http://sx.test")
+    monkeypatch.setattr(appmod, "SERPAPI_KEY", "")
+    monkeypatch.setattr(appmod, "BD_KEY", "")
+    calls = patch_get(monkeypatch, FakeResp(payload={"results": [
+        {"title": "SX &amp; T", "url": "https://s.example/1", "content": "c"},
+    ]}))
+    body = client.get("/api/search?q=x&engine=searxng").get_json()
+    assert body["engine"] == "searxng"
+    assert body["results"][0]["title"] == "SX & T"
+    assert "format=json" in calls["url"] or calls["params"].get("format") == "json"
+    # Places: SearXNG has none
+    r = client.get("/api/search?q=x&engine=searxng&tab=places")
+    assert r.status_code == 400
+
+
+def test_searxng_json_disabled_hint(client, monkeypatch):
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "http://sx.test")
+    monkeypatch.setattr(appmod, "SERPAPI_KEY", "")
+    monkeypatch.setattr(appmod, "BD_KEY", "")
+
+    class R:
+        status_code = 403
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(appmod.requests, "get", lambda *a, **k: R())
+    body = client.get("/api/search?q=x&engine=searxng").get_json()
+    assert "formats" in body["error"]  # actionable hint, not a bare 403
+
+
+def test_config_engines_union_and_searxng(client, monkeypatch):
+    monkeypatch.setattr(appmod, "API_KEY", "k")
+    monkeypatch.setattr(appmod, "SERPAPI_KEY", "sk")
+    monkeypatch.setattr(appmod, "BD_KEY", "bk")
+    monkeypatch.setattr(appmod, "BD_ZONE", "bz")
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "http://sx.test")
+    engines = client.get("/api/config").get_json()["engines"]
+    by_id = {e["id"]: e for e in engines}
+    assert set(by_id) == {"brave", "google", "bing", "searxng"}
+    # one Google pill for BOTH providers, tabs = union
+    assert by_id["google"]["tabs"] == ["web", "news", "images", "places"]
+    assert by_id["searxng"]["tabs"] == ["web", "news", "images"]

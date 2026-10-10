@@ -16,6 +16,20 @@ Format: latest first; sections `Added / Changed / Fixed`.
 - Mobile rigs: `overflow-x: clip` plus `overflow-wrap: anywhere` on result,
   answer and Places text — the page may wrap, but never scrolls sideways.
 
+### Added
+- Provider registry under engine ids: Google/Bing pills can be served by a
+  priority list of providers — SerpApi (`SERPAPI_KEY`; web/news/images/places,
+  Places carries coordinates so the embedded map works like Brave) first,
+  Bright Data second; the UI sees one engine pill with merged capabilities and
+  never knows which provider answered. Cache keys carry the provider so
+  payloads never mix.
+- SearXNG provider (`SEARXNG_URL`): self-hosted metasearch engine pill
+  (web/news/images); friendly error when its settings.yml hasn't enabled
+  `formats: [json]`.
+- New tests: provider priority (SerpApi wins Google, BrightData untouched),
+  Places coordinates, SearXNG mapping/403 hint, config capability unions,
+  rewritten UI engine-switch flow (4 web pills, map renders via SerpApi pins).
+
 ### Changed
 - README leads with an `Engines` section: Bright Data SERP featured as a
   first-class backend alongside Brave, capability table, and an explicit
