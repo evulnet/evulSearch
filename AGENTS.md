@@ -12,7 +12,7 @@ evulSearch: a small self-hosted, privacy-focused search service. A Flask server 
   - `GET /api/search?q=&tab=web|news|images|places&count=&safesearch=&freshness=&spellcheck=&lat=&lon=&loc=` → sanitized results (cache hit adds `"cached": true`)
   - `POST /api/answer {q, freshness}` → `{answer, citations}` (Brave Answers, OpenAI-compatible endpoint; cache hit adds `"cached": true`)
   - `GET /api/config` → `{answers_enabled}` capability flag (no secrets)
-  - Query/result cache: SQLite at `cache_db`, lazy purge on access, TTL stored Empties are NEVER cached (any provider): upstream 200-with-zero-hits happens under rate-limits (real case: SearXNG engine suspensions made `toronto election` look permanently broken); empty answers likewise never cached.
+  - Query/result cache: SQLite at `cache_db`, lazy purge on access, TTL stored Empties are NEVER cached (any provider): upstream 200-with-zero-hits happens under rate-limits (real case: SearXNG engine suspensions made `toronto election` look permanently broken); empty answers likewise never cached. cache_get ALSO DELETES legacy empty rows on read (self-heal so pre-fix deployments purge poisoned entries on first revisit; verified live by overwriting the toronto cache row with an empty payload).
     per row. `cache_hours` (default 168) covers web/images/places/answers;
     `cache_hours_news` (default `-1`) covers news separately — do not default
     news to cached, news must not serve stale. Semantics: `-1` off, `0` forever,

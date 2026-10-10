@@ -17,6 +17,13 @@ Format: latest first; sections `Added / Changed / Fixed`.
   answer and Places text — the page may wrap, but never scrolls sideways.
 
 ### Fixed
+- **Empty upstream responses are no longer cached** (search and answers):
+  providers answer HTTP 200 with zero hits during transient rate-limits (real
+  case: a SearXNG instance whose engines were temporarily suspended), and a
+  cached empty turned one bad minute into a week of blank pages. As a
+  follow-up, `cache_get` now also DELETES legacy empty rows on read, so
+  deployments that stored poison before this fix self-heal on first revisit
+  after a redeploy — no manual database surgery.
 - **Kagi News looked broken:** Kagi returns its news bucket relevance-ranked
   from a shallow pool, so the tab often opened on months-old items — and the
   Freshness dropdown was decorative for news (its `tbs` operator is inert
