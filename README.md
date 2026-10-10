@@ -96,9 +96,13 @@ nothing here is sponsored.
   the settings cog, or server-wide by setting `allow_map_embed: false` in
   `config.json` (the option then disappears from the cog entirely). Note the
   privacy implication: OSM tile servers see the mapped area and visitor IPs.
-- Desktop (≥900px): Places uses a split view — sticky map on the left,
-  listings on the right; image tiles are larger; the lightbox uses ~90% of the
-  viewport with edge-mounted arrows. Phones keep the single-column layout.
+- **Rigid app shell**: the page itself never scrolls on any device. Header,
+  tabs, engine pills and the search bar are always on screen (top-pinned by
+  construction), and vertical scrolling happens only inside the results area —
+  every tab, mobile and desktop alike. Places on desktop (≥900px) is a split
+  view: the map holds its full height on the left while the listings scroll
+  independently. Phones keep the single-column layout. Image tiles are larger
+  on desktop; the lightbox uses ~90% of the viewport with edge-mounted arrows.
 - **Pluggable search engines** — see [Engines](#engines) above. Engine choice
   is per-user (localStorage), deep-linkable (`&engine=`), and gracefully
   falls back when an engine can't serve the current tab. The embedded map

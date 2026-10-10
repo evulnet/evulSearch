@@ -209,6 +209,17 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   After layout toggles call `mapObj.invalidateSize()` guarded by identity check
   `mapObj === m` inside rAF — removed Leaflet maps throw on internals
   (`_leaflet_pos`), and the stubbed map lacks the method; keep both guards.
+- **Rigid shell (user decision 2026-10):** page never scrolls anywhere;
+  `body` is a flex column sized `calc(100dvh / var(--eff-scale, 1))` —
+  `applyZoom()` MUST keep that variable in sync with the effective zoom
+  (scale x mobile 0.75 factor) or the shell overflows at ui_scale != 100
+  (Chrome scales vh units by zoom; the divide-out is load-bearing). Only
+  `#results` (and the settings sheet) scroll: `main`/`.workspace` are
+  overflow-hidden flex columns; desktop Places grid pins the map cell
+  (`grid-row: 1 / 3`) and scrolls only the results area.
+  `test_rigid_shell_page_never_scrolls` guards this at 3 viewports incl.
+  ui_scale 75/150 — do not reintroduce page-level scrolling or
+  `position: sticky` chrome.
 - **XSS hygiene:** all upstream text rendered via `textContent`/`<template>` stripping; never `innerHTML` with Brave data. Outbound links `rel="noopener noreferrer"`.
 - **Settings** (localStorage key `"settings"`, defaults in `DEFAULTS` in app.js): theme, safesearch, count, freshness, spellcheck(web), answers_freshness, enabled_answers/news/images/places, places_location. Pre-paint theme script in `index.html` prevents flash — keep it.
 - `BRAVE_BASE` env override exists only so tests can point at the mock Brave; default is the real API.

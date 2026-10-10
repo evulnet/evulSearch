@@ -16,6 +16,16 @@ Format: latest first; sections `Added / Changed / Fixed`.
 - Mobile rigs: `overflow-x: clip` plus `overflow-wrap: anywhere` on result,
   answer and Places text — the page may wrap, but never scrolls sideways.
 
+### Changed
+- **Fully rigid layout, results-only scrolling (mobile and desktop).** The
+  document never scrolls on any viewport: header, tabs, engine pills and the
+  search bar stay pinned in view at all times, and the only vertical scroller
+  is the results area (every tab, Answers included). Desktop Places split
+  view upgraded: the map holds its full height on the left while the listing
+  column scrolls independently. Layout height divides the ui_scale zoom back
+  out (`100dvh / --eff-scale`), so 75–150% scaling and Safari's collapsing
+  URL bar both keep the search bar on screen.
+
 ### Fixed
 - **Empty upstream responses are no longer cached** (search and answers):
   providers answer HTTP 200 with zero hits during transient rate-limits (real
