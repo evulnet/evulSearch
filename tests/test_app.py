@@ -60,6 +60,8 @@ def _isolate_cache(tmp_path, monkeypatch):
         "cache_db": str(tmp_path / "cache.db"),
     })
     monkeypatch.setattr(appmod, "SERPAPI_KEY", "")
+    monkeypatch.setattr(appmod, "SEARCHAPI_KEY", "")
+    monkeypatch.setattr(appmod, "SEARCHAPI_URL", "http://sa.test/api/v1/search")
     monkeypatch.setattr(appmod, "SEARXNG_URL", "")
 
 
@@ -799,3 +801,85 @@ def test_serpapi_images_shape(client, monkeypatch):
     assert r0["origin"] == "https://upload/fuji.jpg"   # direct image for lightbox
     assert r0["thumb"] == "https://gstatic/t.jpg"      # cheap grid thumbnail
     assert r0["url"] == "https://wiki/fuji"            # source page
+
+
+# --- SearchApi provider (vendor; serves DDG/Google/Bing engines) ---
+
+def _searchapi_env(monkeypatch, serpapi="", bd=False):
+    monkeypatch.setattr(appmod, "SEARCHAPI_KEY", "sak")
+    monkeypatch.setattr(appmod, "SEARCHAPI_URL", "http://sa.test/api/v1/search")
+    monkeypatch.setattr(appmod, "SERPAPI_KEY", serpapi)
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+    monkeypatch.setattr(appmod, "BD_KEY", "bk" if bd else "")
+    monkeypatch.setattr(appmod, "BD_ZONE", "bz" if bd else "")
+
+
+def test_searchapi_duckduckgo_web(client, monkeypatch):
+    _searchapi_env(monkeypatch)
+    calls = patch_get(monkeypatch, FakeResp(payload={"organic_results": [
+        {"title": "DDG &amp; Results", "link": "https://d.example/1",
+         "snippet": "sn"}]}))
+    body = client.get("/api/search?q=x&engine=duckduckgo").get_json()
+    assert body["engine"] == "duckduckgo"
+    assert body["results"][0]["title"] == "DDG & Results"
+    assert body["results"][0]["source"] == "d.example"  # netloc fallback
+    assert calls["params"]["engine"] == "duckduckgo"
+
+
+def test_searchapi_images_nested_shape(client, monkeypatch):
+    _searchapi_env(monkeypatch)
+    patch_get(monkeypatch, FakeResp(payload={"images": [
+        {"title": "Otter", "original": {"link": "https://o.example/1.jpg"},
+         "thumbnail": "https://t.example/1.jpg",
+         "source": {"name": "Bing", "link": "https://p.example/1"}}]}))
+    r0 = client.get("/api/search?q=otter&engine=duckduckgo&tab=images")\
+             .get_json()["results"][0]
+    assert r0["origin"] == "https://o.example/1.jpg"
+    assert r0["thumb"] == "https://t.example/1.jpg"
+    assert r0["source"] == "Bing"
+
+
+def test_searchapi_places_coords_no_website(client, monkeypatch):
+    _searchapi_env(monkeypatch)
+    patch_get(monkeypatch, FakeResp(payload={"local_results": [
+        {"title": "Sushi place", "address": "1 st", "rating": 4.2,
+         "reviews": 9, "type": "sushi",
+         "gps_coordinates": {"latitude": 34.7, "longitude": 135.5}}]}))
+    r0 = client.get("/api/search?q=sushi&engine=google&tab=places")\
+             .get_json()["results"][0]
+    assert r0["coordinates"] == [34.7, 135.5]  # map pins work
+    assert r0["url"] == ""                     # no website link in payload
+
+
+def test_searchapi_priority_full_registry(client, monkeypatch):
+    # All three google-capable providers configured: SerpApi wins (richest).
+    _searchapi_env(monkeypatch, serpapi="sk", bd=True)
+    posts = _patch_post(monkeypatch, {"organic": []})
+    calls = patch_get(monkeypatch, FakeResp(payload={"organic_results": []}))
+    client.get("/api/search?q=x&engine=google")
+    assert "serpapi.com" in calls["url"]  # serpapi first (default URL)
+    assert "url" not in posts
+
+
+def test_searchapi_serves_bing_before_brightdata(client, monkeypatch):
+    _searchapi_env(monkeypatch, bd=True)
+    posts = _patch_post(monkeypatch, {"organic": []})
+    calls = patch_get(monkeypatch, FakeResp(payload={"organic_results": []}))
+    client.get("/api/search?q=x&engine=bing")
+    assert "sa.test" in calls["url"] and "url" not in posts
+
+
+def test_searchapi_duckduckgo_tab_guards(client, monkeypatch):
+    _searchapi_env(monkeypatch)
+    _patch_post(monkeypatch, {})
+    assert client.get("/api/search?q=x&engine=duckduckgo&tab=places").status_code == 400
+    assert client.get("/api/search?q=x&engine=duckduckgo&tab=news").status_code == 400
+
+
+def test_config_lists_duckduckgo_engine(client, monkeypatch):
+    monkeypatch.setattr(appmod, "API_KEY", "k")
+    _searchapi_env(monkeypatch)
+    engines = {e["id"]: e for e in client.get("/api/config").get_json()["engines"]}
+    assert engines["duckduckgo"]["tabs"] == ["web", "images"]
+    assert engines["duckduckgo"]["label"] == "DuckDuckGo"
+    assert engines["bing"]["tabs"] == ["web", "news", "images"]

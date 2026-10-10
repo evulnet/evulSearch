@@ -22,14 +22,18 @@ CONFIG_PATH = os.environ.get("EVUL_CONFIG_PATH", os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "config.json"))
 
 # Provider registry (used by config cleaning, priority and quotas).
-PROVIDER_NAMES = {"brave", "serpapi", "brightdata", "searxng"}
+PROVIDER_NAMES = {"brave", "serpapi", "searchapi", "brightdata", "searxng"}
 # Engines the UI knows about and the provider order used when config.json
 # does not override it via "engine_priority". An EMPTY list in config means
 # "engine disabled"; providers may also be reordered per engine.
+# Google: SerpApi first (its Places carry website/phone/hours; SearchApi's
+# places lack a website link); SearchApi then covers Bing richer than Bright
+# Data (news+images) so Bing prefers SearchApi.
 ENGINE_DEFAULT_ORDER = {
     "brave": ["brave"],
-    "google": ["serpapi", "brightdata"],
-    "bing": ["brightdata"],
+    "duckduckgo": ["searchapi"],
+    "google": ["serpapi", "searchapi", "brightdata"],
+    "bing": ["searchapi", "brightdata"],
     "searxng": ["searxng"],
 }
 
@@ -225,6 +229,20 @@ SERPAPI_CAPS = {"google": ["web", "news", "images", "places"]}
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "").rstrip("/")
 SEARX_CAPS = ["web", "news", "images"]
 
+# SearchApi.io: commercial SERP API (NOT privacy-related despite serving
+# DDG results; free tier ~100 searches/mo, zero-retention is an enterprise-only
+# option). SerpApi-compatible payloads; engines verified live 2026-10 on the
+# free plan: google full, bing web/news/images, duckduckgo web/images (the
+# *_news / *_maps DDG variants are NOT offered — do not add them to caps).
+SEARCHAPI_KEY = os.environ.get("SEARCHAPI_KEY", "")
+SEARCHAPI_URL = os.environ.get("SEARCHAPI_SEARCH_URL",
+                               "https://www.searchapi.io/api/v1/search")
+SEARCHAPI_CAPS = {
+    "google": ["web", "news", "images", "places"],
+    "bing": ["web", "news", "images"],
+    "duckduckgo": ["web", "images"],
+}
+
 def _provider_caps(prov, engine):
     if prov == "brave":
         return BRAVE_CAPS if engine == "brave" else None
@@ -232,6 +250,8 @@ def _provider_caps(prov, engine):
         return list(SEARX_CAPS) if engine == "searxng" else None
     if prov == "serpapi":
         return SERPAPI_CAPS.get(engine)
+    if prov == "searchapi":
+        return SEARCHAPI_CAPS.get(engine)
     if prov == "brightdata":
         return BD_CAPS.get(engine)
     return None
@@ -240,6 +260,7 @@ def _provider_caps(prov, engine):
 def _provider_configured(prov):
     return {"brave": bool(API_KEY),
             "serpapi": bool(SERPAPI_KEY),
+            "searchapi": bool(SEARCHAPI_KEY),
             "brightdata": bool(BD_KEY and BD_ZONE),
             "searxng": bool(SEARXNG_URL)}.get(prov, False)
 
@@ -270,7 +291,7 @@ def engines_available():
     a quota-exhausted provider falls through to the next one at request time.
     """
     e = []
-    for eng in ("brave",) + BD_ENGINES + ("searxng",):
+    for eng in ("brave", "duckduckgo", "google", "bing", "searxng"):
         tabs = []
         for _prov, caps in engine_providers(eng):
             tabs += [t for t in caps if t not in tabs]
@@ -278,6 +299,8 @@ def engines_available():
             entry = {"id": eng, "tabs": tabs}
             if eng == "searxng":
                 entry["label"] = "SearXNG"
+            elif eng == "duckduckgo":
+                entry["label"] = "DuckDuckGo"
             e.append(entry)
     return e
 PORT = int(os.environ.get("PORT", 5000))
@@ -652,6 +675,117 @@ def _serpapi_map(items, tab):
 SEARX_TBS = {"day": "day", "week": "week", "month": "month", "year": "year"}
 
 
+def _searchapi_search(query, engine, tab, count, safesearch, freshness):
+    """Results via SearchApi.io. Returns (items, error); one is non-None.
+
+    Engine mapping (all live-verified on the free plan, 2026-10):
+    google/bing Places ride the plain engine (local_results); DDG has only
+    web + images variants.
+    """
+    if engine == "duckduckgo":
+        serp_engine = "duckduckgo" if tab == "web" else "duckduckgo_images"
+    elif tab == "news":
+        serp_engine = f"{engine}_news"
+    elif tab == "images":
+        serp_engine = f"{engine}_images"
+    else:
+        serp_engine = engine
+    params = {"engine": serp_engine, "q": query, "api_key": SEARCHAPI_KEY,
+              "hl": "en", "gl": "us", "num": min(count, 20)}
+    if safesearch == "strict":
+        params["safe"] = "strict" if engine == "duckduckgo" else "active"
+    elif safesearch == "off":
+        params["safe"] = "off"
+    if freshness in ("day", "week", "month", "year"):
+        if engine == "duckduckgo":
+            params["df"] = {"day": "d", "week": "w", "month": "m", "year": "y"}[freshness]
+        elif engine == "google" and tab in ("web", "news"):
+            params["tbs"] = {"day": "qdr:d", "week": "qdr:w",
+                             "month": "qdr:m", "year": "qdr:y"}[freshness]
+    try:
+        resp = requests.get(SEARCHAPI_URL, params=params, timeout=60)
+    except requests.RequestException:
+        return None, "Could not reach SearchApi."
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {}
+    if resp.status_code != 200:
+        # Upstream error bodies can quote the request; relay only the status.
+        return None, f"SearchApi error (HTTP {resp.status_code})."
+    if tab == "places":
+        lr = data.get("local_results") or []
+        items = lr.get("places") if isinstance(lr, dict) else lr
+        items = items or []
+    elif tab == "images":
+        items = data.get("images") or []
+    else:
+        items = data.get("organic_results") or []
+    return items[:count], None
+
+
+def _searchapi_map(items, tab):
+    """SearchApi items -> our normalized shapes."""
+    out = []
+    for it in items:
+        title = html.unescape(str(it.get("title") or ""))
+        if not title:
+            continue
+        if tab == "places":
+            gps = it.get("gps_coordinates") or {}
+            lat, lon = gps.get("latitude"), gps.get("longitude")
+            bits = []
+            if it.get("rating"):
+                bits.append(f"{it['rating']}\u2605")
+            if it.get("reviews"):
+                bits.append(f"{it['reviews']} reviews")
+            img = it.get("image")
+            if isinstance(img, dict):
+                img = img.get("original") or img.get("thumbnail") or ""
+            out.append({
+                "title": title,
+                "url": "",  # SearchApi places carry no website link
+                "address": html.unescape(str(it.get("address") or "")),
+                "phone": str(it.get("phone") or ""),
+                "coordinates": [lat, lon] if lat is not None and lon is not None else [],
+                "categories": html.unescape(str(it.get("type") or "")),
+                "opening": " \u00b7 ".join(bits),
+                "description": "",
+                "img": str(img or ""),
+            })
+            continue
+        if tab == "images":
+            # ddg/google images[]: `original` and `source` may be dicts
+            # ({link}/{name,link}) or plain strings depending on engine.
+            def _f(v, key="link"):
+                return v.get(key) if isinstance(v, dict) else (v if isinstance(v, str) else "")
+            origin = _f(it.get("original")) or _f(it.get("thumbnail"))
+            link = _f(it.get("source")) or _f(it, "link")
+            if not origin:
+                continue
+            src = it.get("source")
+            src_name = src.get("name") if isinstance(src, dict) else ""
+            out.append({
+                "title": title, "url": link or origin,
+                "source": src_name or urlparse(link or origin).netloc,
+                "thumb": _f(it.get("thumbnail")) or origin,
+                "origin": origin,
+            })
+            continue
+        src = it.get("source")
+        src_name = src.get("name") if isinstance(src, dict) else \
+            (src if isinstance(src, str) and src else "")
+        link = str(it.get("link") or "")
+        row = {
+            "title": title, "url": link,
+            "description": html.unescape(str(it.get("snippet") or "")),
+            "age": str(it.get("date") or ""),
+            "source": src_name or urlparse(link).netloc or "search",
+        }
+        out.append(row)
+    return out
+
+
 def _searx_search(query, tab, count, safesearch, freshness):
     """Results from a self-hosted SearXNG (JSON API). (items, error)."""
     cats = {"web": "general", "news": "news", "images": "images"}[tab]
@@ -711,7 +845,7 @@ def index():
 @app.get("/api/search")
 def search():
     engine = request.args.get("engine", "brave")
-    if engine not in ("brave", "searxng") + BD_ENGINES:
+    if engine not in ENGINE_DEFAULT_ORDER:
         engine = "brave"
     # Per-engine availability (missing key OR disabled via engine_priority)
     # is decided in one place below, together with quota fall-through.
@@ -795,6 +929,8 @@ def search():
         qparam = params.get("q", query)
         if provider == "serpapi":
             items, err = _serpapi_search(qparam, engine, tab, count, safesearch, freshness_raw)
+        elif provider == "searchapi":
+            items, err = _searchapi_search(qparam, engine, tab, count, safesearch, freshness_raw)
         elif provider == "searxng":
             items, err = _searx_search(qparam, tab, count, safesearch, freshness_raw)
         else:
@@ -803,6 +939,8 @@ def search():
             return jsonify(error=err), 502
         if provider == "serpapi":
             results = _serpapi_map(items, tab)
+        elif provider == "searchapi":
+            results = _searchapi_map(items, tab)
         elif provider == "searxng":
             results = _searx_map(items, tab)
         elif tab == "places":

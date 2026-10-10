@@ -17,6 +17,15 @@ Format: latest first; sections `Added / Changed / Fixed`.
   answer and Places text — the page may wrap, but never scrolls sideways.
 
 ### Added
+- **SearchApi.io provider** (`SEARCHAPI_KEY`): new **DuckDuckGo engine pill**
+  (web + images — SearchApi's plan has no DDG news/maps engines), a second
+  provider for Google, and **Bing upgrades to web/news/images**. SearchApi
+  Places carry GPS coordinates (Google-pill map pins now come from SerpApi
+  *or* SearchApi). Default priorities: Google = SerpApi > SearchApi > Bright
+  Data; Bing = SearchApi > Bright Data (both overridable via
+  `engine_priority`). Heads-up: SearchApi is a commercial SERP vendor
+  (~100 free searches/month; zero-retention is enterprise-tier only) —
+  DuckDuckGo *results*, not a DuckDuckGo *relationship*.
 - **Admin provider levers** in `config.json`: `engine_priority` (per-engine
   provider order; omitted provider disabled, `[]` disables the engine) and
   `provider_quotas` (`per_day`/`per_month`, UTC resets, counted in SQLite

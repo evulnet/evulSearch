@@ -131,6 +131,36 @@ def make_mock_brave():
              "content": "sx &amp; snippet"},
         ])
 
+    @app.get("/searchapi/search")
+    def searchapi():
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(request.full_path).query)
+        assert qs.get("api_key", [""])[0] == "MOCK-SEARCHAPI-KEY"
+        q = qs.get("q", [""])[0]
+        eng = qs.get("engine", [""])[0]
+        if eng.endswith("_images") or eng == "bing_images":
+            return jsonify(images=[
+                {"title": f"SearchApi image {q}",
+                 "original": {"link": "https://sa.example/full.jpg"},
+                 "thumbnail": "https://sa.example/i1.jpg",
+                 "source": {"name": "ddgy", "link": "https://sa.example/p1"}}])
+        if eng == "google" and request.args.get("q", "").startswith("sushi in"):
+            # places ride the plain google engine (verified live 2026-10)
+            return jsonify(local_results=[
+                {"title": f"SearchApi place for {q}", "address": "1 Osaka road",
+                 "rating": 4.2, "reviews": 130, "type": "sushi",
+                 "gps_coordinates": {"latitude": 34.7, "longitude": 135.5}}])
+        if eng.endswith("_news"):
+            return jsonify(organic_results=[
+                {"title": f"SearchApi news for {q}", "link": "https://sa.example/n1",
+                 "snippet": "sn", "source": "sa.example", "date": "2 hours ago"}])
+        return jsonify(organic_results=[
+            {"title": f"SearchApi result for {q}", "link": "https://sa.example/1",
+             "snippet": "sa &amp; one"},
+            {"title": "Second SearchApi result", "link": "https://sa.example/2",
+             "snippet": "sa two"},
+        ])
+
     @app.post("/request")
     def bd_request():
         from urllib.parse import urlparse, parse_qs
@@ -260,6 +290,8 @@ def app_server(mock_brave, tmp_path_factory):
         "BRIGHTDATA_API_URL": mock_brave.removesuffix("/res/v1") + "/request",
         "SERPAPI_KEY": "MOCK-SERPAPI-KEY",
         "SERPAPI_SEARCH_URL": mock_brave.removesuffix("/res/v1") + "/serpapi/search.json",
+        "SEARCHAPI_KEY": "MOCK-SEARCHAPI-KEY",
+        "SEARCHAPI_SEARCH_URL": mock_brave.removesuffix("/res/v1") + "/searchapi/search",
         "SEARXNG_URL": mock_brave.removesuffix("/res/v1") + "/searxng",
         "LOCAL_CHAT_BASE_URL": mock_brave.removesuffix("/res/v1") + "/v1",
         "EVUL_CONFIG_PATH": str(cfg),

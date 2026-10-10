@@ -4,9 +4,10 @@
   "cache_db": "search_cache.db",
   "allow_map_embed": true,
   "engine_priority": {
-    "google": ["serpapi", "brightdata"],
-    "bing": ["brightdata"],
     "brave": ["brave"],
+    "duckduckgo": ["searchapi"],
+    "google": ["serpapi", "searchapi", "brightdata"],
+    "bing": ["searchapi", "brightdata"],
     "searxng": ["searxng"]
   },
   "provider_quotas": {

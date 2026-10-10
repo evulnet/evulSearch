@@ -1,10 +1,11 @@
 # evulSearch
 
 A small, privacy-focused self-hosted search service. One Flask process proxies
-your queries through a **pluggable engine registry** — Brave's native API and/or
-Google & Bing via the **Bright Data SERP API** — so your API keys never touch
-the browser. Add the keys you have; evulSearch shows exactly what your backends
-can do and nothing more.
+your queries through a **pluggable engine registry** — Brave native, plus
+Google / Bing / DuckDuckGo via SERP vendors (SerpApi, SearchApi, Bright Data)
+or your own SearXNG, and optional AI Answers (Brave or any OpenAI-compliant
+endpoint) — so your API keys never touch the browser. Add the keys you have;
+evulSearch shows exactly what your backends can do and nothing more.
 
 No cookies, no analytics. Results are cached server-side for faster repeat
 searches (configurable, off-switch available). Designed to run on a private
@@ -19,22 +20,38 @@ no backend can serve hide themselves. **More backend APIs will follow**; an
 engine is a capability line plus a URL builder and a mapper, and adding one
 means touching none of the others.
 
-| Engine | Backend | Web | News | Images | Places | Answers |
+| Engine | Providers (best-first) | Web | News | Images | Places | Answers |
 |---|---|---|---|---|---|---|
-| Brave | native Search API | ✅ | ✅ | ✅ | ✅ | ✅ (own key) |
-| Google | SerpApi and/or Bright Data SERP† | ✅ | ✅ | ✅ | ✅ | – |
-| Bing | Bright Data SERP | ✅ | – | – | – | – |
+| Brave | Brave Search API (native) | ✅ | ✅ | ✅ | ✅ | ✅ (own key) |
+| DuckDuckGo | SearchApi | ✅ | – | ✅ | – | – |
+| Google | SerpApi, SearchApi, Bright Data | ✅ | ✅ | ✅ | ✅† | – |
+| Bing | SearchApi, Bright Data | ✅ | ✅ | ✅ | – | – |
 | SearXNG | your own SearXNG instance | ✅ | ✅ | ✅ | – | – |
 | Local | any OpenAI-compliant /v1 | – | – | – | – | ✅ |
 
-† Providers are priority-listed per engine: **SerpApi first** (richer payloads),
-Bright Data as fallback. One “Google” pill, best available data. The embedded
-map renders for **any** engine whose Places results carry coordinates — Brave
-and SerpApi yes, Bright Data's local-pack scrape no.
+† The embedded map renders for **any** engine whose Places results carry
+coordinates: Brave yes, Google yes when SerpApi or SearchApi serves it, Bright
+Data's local-pack scrape no (it links out to Google Maps instead).
 
-SerpApi (~100 free searches/month) and SearXNG (self-hosted, free forever) join
-Bright Data and Brave in the “you can try everything for nothing” club —
-check current pricing at each vendor.
+One pill per engine id even when several providers can serve it: you pick
+“Google”, the server picks the provider by priority and quota
+([Provider levers](#provider-levers-priority--quotas)), and the answer carries
+no provider name because it is an implementation detail of your deployment.
+
+A note on naming: the DuckDuckGo engine means *DuckDuckGo results*, fetched for
+you by SearchApi. There is no public DuckDuckGo API any more, so those results
+arrive through a commercial SERP vendor like every other row here. DuckDuckGo's
+privacy stance is a property of its index, not of the pipe you read it through.
+SearchApi's zero-retention commitment is enterprise-tier only, so on a hobby
+deployment assume your queries reach a third party. The guarantees evulSearch
+itself makes — no keys in the browser, no logs, your server as the only
+entry point — are unaffected either way.
+
+Everything above has a free tier (as of October 2026): Brave has a free monthly
+quota, SearchApi ~100 searches/month, SerpApi ~100/month, Bright Data ships free
+credits, and SearXNG is self-hosted so free forever. SearchApi's light quota is
+exactly what `provider_quotas` exists to manage. Check pricing pages for current
+numbers; nothing here is sponsored.
 
 ## Features
 
@@ -116,17 +133,18 @@ after editing.
 
 ### Provider levers: priority & quotas
 
-One engine pill (say “Google”) can be served by several upstream providers.
-Two config levers decide **which one answers** and **how often** — so the
-admin chooses richer vs cheaper *knowingly*, per engine:
+One engine pill (say Google) can be served by several upstream providers.
+Two config levers decide which one answers and how often, so the admin
+chooses richer vs cheaper knowingly, per engine:
 
 ```json
 {
   "engine_priority": {
     "google": ["brightdata", "serpapi"],
     "bing": ["brightdata"],
+    "duckduckgo": [],
     "brave": ["brave"],
-    "searxng": []
+    "searxng": ["searxng"]
   },
   "provider_quotas": {
     "serpapi": {"per_day": 20, "per_month": 100}
@@ -134,38 +152,41 @@ admin chooses richer vs cheaper *knowingly*, per engine:
 }
 ```
 
-**`engine_priority`** — provider order per engine (valid provider names:
-`brave`, `serpapi`, `brightdata`, `searxng`):
+Valid provider names: `brave`, `serpapi`, `searchapi`, `brightdata`,
+`searxng`.
+
+**`engine_priority`** — provider order per engine:
 - The first provider that supports the tab **and is under its quota** answers.
 - Providers omitted from a non-empty list are **disabled for that engine**.
-  The example puts Bright Data first for Google: SerpApi is the overflow,
-  not the default. The built-in order is SerpApi first (richer Places: map
-  coordinates, phone, opening hours).
-- An **empty list disables the engine entirely**: the pill disappears from
-  the UI and direct API calls get 503.
-- Unknown provider names are dropped; engines you don't list keep the
-  built-in order.
+  The example puts Bright Data first for Google: SerpApi is overflow, not
+  default.
+- An **empty list disables the engine entirely**: the pill disappears from the
+  UI and direct API calls return 503.
+- Unset engines keep the built-in order: Google = SerpApi, SearchApi, Bright
+  Data (SerpApi first because its Places carry website/phone/opening hours);
+  Bing = SearchApi, Bright Data (SearchApi also serves Bing news/images).
+- Unknown provider names are dropped.
 
-**`provider_quotas`** — per-provider call budgets (all providers, Brave
+**`provider_quotas`** — call budgets per provider (all providers, Brave
 included):
-- `per_day` and/or `per_month`, reset on **UTC** day/month boundaries.
-  Counts persist in the `provider_usage` table of `cache_db` — counts only,
-  never query text.
+- `per_day` and/or `per_month`, reset on UTC day/month boundaries. Counts
+  persist in the `provider_usage` table of `cache_db` — counts only, never
+  query text.
 - On exhaustion the request **falls through to the next provider that can
   serve the tab**; a metered API degrades instead of failing. If every
   covering provider is capped out, the search returns a 429 naming the
   quotas hit.
-- **Cache hits never count against quota.** Pairing a long `cache_hours`
-  with a small metered budget is a deliberate strategy: repeats are free,
-  each distinct query spends the meter once.
+- **Cache hits never count against quota.** Pairing a long `cache_hours` with
+  a small metered budget is a deliberate strategy: repeats are free, each
+  distinct query spends the meter once.
 - Enabling quotas creates the SQLite file for counters even when
   `cache_hours: -1` turned the query cache off.
 
 Strategies that combine well: *hoard a small SerpApi plan* —
 `"provider_quotas": {"serpapi": {"per_day": 5}}` buys 5 map-pinned Google
-Places searches a day and sends everything else to Bright Data; *free-first*
-— leave quotas off and order `brave`/`searxng` ahead of paid providers on
-the Web tab.
+Places searches a day and sends everything else to cheaper providers;
+*stretch SearchApi's ~100/month* — quota it at 90 so the last 10 are always
+available for the DuckDuckGo pill rather than silently spent on Google.
 
 ## How it works
 
@@ -182,10 +203,9 @@ browser ──HTTP──> Flask (app.py) ──HTTPS──> Brave Search API
 
 Requires Python 3.11+.
 
-Both upstream search providers currently have free tiers (as of October 2026):
-the Brave Search API offers a free monthly quota, and Bright Data's SERP API
-includes free credits — so you can try evulSearch end to end without paying
-anything. Check their pricing pages for current numbers; nothing here is
+Every supported backend has a free tier (as of October 2026), so you can run
+evulSearch end to end without paying anything; see [Engines](#engines) for the
+numbers. Check the vendors' pricing pages for current figures; nothing here is
 sponsored.
 
 ```bash
@@ -203,7 +223,8 @@ cp .env.example .env        # then edit .env
 | `BRAVE_ANSWERS_KEY` | no | Answers (separate Brave product; tab hides when unset) |
 | `BRIGHTDATA_SERP_API_KEY` | no | Google (Web/News/Images/Places) + Bing (Web) engines via Bright Data SERP |
 | `BRIGHTDATA_SERP_ZONE` | with BD key | Your Bright Data zone name (required by the API) |
-| `SERPAPI_KEY` | no | SerpApi provider for the Google pill (web/news/images/**places-with-map-pins**); takes priority over BrightData |
+| `SERPAPI_KEY` | no | SerpApi provider for the Google pill (web/news/images/**places-with-map-pins**); first priority for Google |
+| `SEARCHAPI_KEY` | no | SearchApi.io provider: the DuckDuckGo engine (web/images) plus Google (all tabs) and Bing (web/news/images). Free tier ~100/mo — pair with `provider_quotas` |
 | `SEARXNG_URL` | no | Base URL of a self-hosted SearXNG (web/news/images); its settings.yml must allow `formats: [json]` |
 | `LOCAL_CHAT_BASE_URL` | no | OpenAI-compliant answers server, e.g. `http://127.0.0.1:8000/v1` (enables the “Local” answers pill) |
 | `LOCAL_CHAT_API_KEY` | no | Bearer token, only sent if set (many local servers need none) |
@@ -247,7 +268,15 @@ or search API is ever contacted from the test suite.
   neighbor). Only do this on a network you control. Prefer `https://` or a
   tunnel for anything beyond the LAN. When `LOCAL_CHAT_API_KEY` is set, that
   token also travels in a Bearer header and would be sniffable over HTTP.
-- **Bright Data-backed searches (Google/Bing pills) can be slow and may time
+- **Your queries go to whichever vendors you configure.** Brave, SerpApi,
+  SearchApi and Bright Data each see the query text and your server's address;
+  none of them are "private by contract" on hobby tiers (SearchApi's
+  zero-retention offer is enterprise-tier only). SERP vendors exist to sell
+  search results — treat them like any third party. If vendor-free is the
+  goal, the only option today is your own SearXNG instance (and even that
+  fetches from upstream engines). Brave's own API is the most privacy-
+  respectful of the hosted options.
+- **Bright Data-backed searches (when Bright Data serves the pill) can be slow and may time
   out.** BrightData scrapes the live results page rather than querying an API,
   so first-hit latency is a real browse: ~5 s for web, ~30 s for Google
   Images, and 60–90 s for Google Places (Google's local-pack payload embeds
@@ -278,7 +307,18 @@ Brave:
 - Places location override is composed into the query (`<q> in <loc>`); Brave
   has no structured geocoding parameter on this endpoint.
 
-Bright Data (Google/Bing pills):
+SearchApi (DuckDuckGo engine; Google/Bing backup provider):
+- DuckDuckGo serves Web and Images only — SearchApi has no DDG news/maps
+  engines on this plan (verified live), so the DuckDuckGo pill never shows
+  News or Places tabs.
+- DuckDuckGo Places coordinates exist in SearchApi's *maps* product, which
+  this plan does not include — do not re-add `duckduckgo_maps` to caps
+  without probing first.
+- Google Places via SearchApi carry GPS coordinates but **no website link**;
+  the card's title focuses the map pin, and there is no Website button for
+  those results (SerpApi-filled Google results do have one).
+
+Bright Data (when it serves the Google/Bing pills):
 - Google Places (`tbm=lcl`) carries no coordinates, so browser geolocation is
   ignored there and the map stays empty — put the place in the query or the
   Places location box instead. Bing serves the Web tab only.

@@ -111,6 +111,24 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   parse only; lcl carries ~15MB-equivalent base64 place photos (no documented
   exclusion flag) -> ~60-90s scrapes, BD timeout 120s, mitigated by the query
   cache on repeats.
+- **SearchApi.io provider (`SEARCHAPI_KEY` — NOT `DUCKDUCKGO_KEY`, user
+  corrected the naming twice: it is a commercial SERP vendor, zero-retention
+  is enterprise-only, do NOT brand it privacy-forward; there is no official
+  public DuckDuckGo API).** Adds engine `duckduckgo` (caps web/images ONLY —
+  `duckduckgo_news`/`duckduckgo_maps` engines return "Unsupported engine" on
+  the free plan, verified live; DDG freshness rides `df=d|w|m|y`, safe via
+  `safe=off|moderate|strict`) and upgrades Bing to web/news/images (news =
+  `bing_news` -> organic_results with date/source; images = `bing_images` ->
+  `images[]`). Google caps stay full. LIVE shapes (2026-10): web/news
+  `organic_results`; images `images[]` with NESTED `original{link}`/
+  `thumbnail`/`source{name,link}` (mapper `_f()` tolerates str-or-dict);
+  places = plain `engine=google` -> `local_results[]` LIST (not the
+  serpapi-style dict!) with `gps_coordinates` but NO website link -> url must
+  map to "" (frontend renders plain span — keep). Default orders: google
+  [serpapi, searchapi, brightdata] (serpapi richer: website/phone/hours),
+  bing [searchapi, brightdata], duckduckgo [searchapi]. Unit tests must pin
+  SEARCHAPI_KEY/URL like every provider (dev .env has a real key — unpinned
+  tests hit the real vendor and burn the 100/mo quota).
 - **Admin provider levers (config.json, user decision 2026-10):**
   `engine_priority` = per-engine provider order (omitted provider = disabled
   for that engine; `[]` disables the engine and hides its pill) and

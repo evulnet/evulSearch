@@ -485,7 +485,8 @@ def test_engine_switch(browser, app_server):
     page.on("pageerror", lambda e: errors.append(e))
     page.goto(app_server + "/")
     expect(page.locator("#engines")).to_be_visible()
-    expect(page.locator("#engines button")).to_have_count(4)
+    # brave, duckduckgo, google, bing, searxng
+    expect(page.locator("#engines button")).to_have_count(5)
 
     # Google pill is served by SerpApi (best-first provider order)
     page.click('#engines button[data-engine="google"]')
@@ -494,9 +495,9 @@ def test_engine_switch(browser, app_server):
     expect(page.locator("#results li").first).to_contain_text("SerpApi result for hello")
     expect(page.locator("#results li")).to_have_count(2)
 
-    # News: SerpApi google_news; Bing drops out, SearXNG joins
+    # News: DuckDuckGo drops out (SearchApi plan has no DDG news engine)
     page.click('#tabs button[data-tab="news"]')
-    expect(page.locator("#engines button")).to_have_count(3)
+    expect(page.locator("#engines button")).to_have_count(4)
     page.press("#q", "Enter")
     expect(page.locator("#results li").first).to_contain_text("SerpApi news for hello")
 
@@ -508,12 +509,17 @@ def test_engine_switch(browser, app_server):
     expect(page.locator("#map")).to_be_visible()
     assert page.evaluate("window.__fakeL.markers") >= 1
 
-    # Images: Brave + Google + SearXNG
+    # Images: every engine serves images now (bing news/images via SearchApi)
     page.click('#tabs button[data-tab="images"]')
-    expect(page.locator("#engines button")).to_have_count(3)
+    expect(page.locator("#engines button")).to_have_count(5)
+
+    # DuckDuckGo pill (SearchApi-served): web + images only
+    page.click('#tabs button[data-tab="web"]')
+    page.click('#engines button[data-engine="duckduckgo"]')
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_contain_text("SearchApi result for hello")
 
     # SearXNG pill: self-hosted metasearch, web/news/images
-    page.click('#tabs button[data-tab="web"]')
     page.click('#engines button[data-engine="searxng"]')
     page.press("#q", "Enter")
     expect(page.locator("#results li").first).to_contain_text("SearXNG result for hello")
