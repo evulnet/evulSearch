@@ -18,8 +18,10 @@ Format: latest first; sections `Added / Changed / Fixed`.
 
 ### Added
 - **Mobile tuck:** searching on phones collapses the brand/gear and tab rows
-  for maximum results; pull down inside the results (or tap the chevron) to
-  bring them back. Desktop is untouched.
+  for maximum results; the italic ⌕ evulSearch chip (left of the engine
+  pills, styled apart from them) brings them back. Desktop is untouched.
+- **iOS focus-zoom prevention:** text fields render at a steady 16px at any
+  ui_scale, so tapping the search box no longer zooms the page in for good.
 
 ### Fixed
 - **iOS could still pan the whole page** despite the rigid shell (Safari

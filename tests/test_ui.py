@@ -618,33 +618,59 @@ def test_rigid_shell_page_never_scrolls(browser, app_server):
         ctx.close()
 
 
-def test_mobile_tuck_and_reveal(browser, app_server):
+def test_mobile_tuck_and_chip_reveal(browser, app_server):
     ctx = browser.new_context(viewport={"width": 390, "height": 844},
                               has_touch=True, is_mobile=True)
     page = ctx.new_page()
     page.goto(app_server + "/")
-    expect(page.locator("header")).to_be_visible()   # welcome state: full chrome
+    expect(page.locator("header")).to_be_visible()      # welcome: full chrome
+    expect(page.locator("#tuck-chip")).to_be_hidden()   # chip lives only tucked
     page.fill("#q", "hello")
     page.press("#q", "Enter")
     expect(page.locator("#results li").first).to_be_visible()
-    # tucked on mobile after search
+    # tucked on mobile after a search
     expect(page.locator("header")).to_be_hidden()
     expect(page.locator("#tabs")).to_be_hidden()
-    expect(page.locator("#tuck-handle")).to_be_visible()
-    # chevron reveals
-    page.click("#tuck-handle")
+    # chip sits left of the engine pills and looks unlike them
+    chip = page.locator("#tuck-chip")
+    expect(chip).to_be_visible()
+    # it is the first child of the pill row, before any engine pill button
+    assert page.evaluate(
+        "document.getElementById('engines').firstElementChild.id") == "tuck-chip"
+    assert "evulSearch" in chip.inner_text()
+    assert "999" in chip.evaluate("el => getComputedStyle(el).borderRadius")
+    # pills still expose as before (chip is a span, not a pill button)
+    assert page.locator("#engines button").count() >= 2
+    assert page.locator("#engines button").first.get_attribute("id") is None
+    # tap reveals the full top UI and the chip itself goes away
+    chip.tap()
     expect(page.locator("header")).to_be_visible()
-    # search again, then real pull-down gesture reveals
+    expect(page.locator("#tabs")).to_be_visible()
+    expect(page.locator("#tuck-chip")).to_be_hidden()
+    # searching tucks again
     page.press("#q", "Enter")
     expect(page.locator("header")).to_be_hidden()
-    page.evaluate("""() => {
-      const el = document.getElementById('results');
-      const mk = (type, y) => new TouchEvent(type, { touches:
-        [new Touch({ identifier: 1, target: el, clientY: y })] });
-      el.dispatchEvent(mk('touchstart', 100));
-      el.dispatchEvent(mk('touchmove', 200));
+    expect(chip).to_be_visible()
+    ctx.close()
+
+
+def test_mobile_inputs_stay_16px_rendered(browser, app_server):
+    # iOS focuses-zooms rendered font sizes < 16px; ui_scale 75 must not
+    # push the search box under that line.
+    ctx = browser.new_context(viewport={"width": 390, "height": 844},
+                              has_touch=True, is_mobile=True)
+    page = ctx.new_page()
+    page.goto(app_server + "/")
+    px = page.evaluate("""() => {
+      const el = document.getElementById('q');
+      // rendered size = computed * effective zoom (Playwright rect proxy)
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return { fs: parseFloat(cs.fontSize),
+               eff: parseFloat(getComputedStyle(document.documentElement)
+                                 .getPropertyValue('--eff-scale')) || 1 };
     }""")
-    expect(page.locator("header")).to_be_visible()
+    assert px["fs"] * px["eff"] >= 15.5, px
     ctx.close()
 
 

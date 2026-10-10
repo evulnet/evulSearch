@@ -97,8 +97,12 @@ nothing here is sponsored.
   `config.json` (the option then disappears from the cog entirely). Note the
   privacy implication: OSM tile servers see the mapped area and visitor IPs.
 - **Mobile tuck**: on phones, a search collapses the brand/gear row and the
-  tab bar so results own the screen; pull down inside the results (or tap
-  the ⌄ chevron) to reveal them. Desktop never tucks.
+  tab bar so results own the screen. To bring them back, tap the italic
+  ⌕ evulSearch chip that appears left of the engine pills — deliberately
+  unlike a pill. (No pull-down gesture: it collided UX-wise with iOS's own
+  top-pull.) Desktop never tucks, and its pills row never shows the chip.
+- **No iOS focus-zoom**: text fields hold a rendered 16px font-size at every
+  ui_scale (iOS refuses to focus fields below that and won't zoom back out).
 - **iOS hard-lock**: `html`/`body` are pinned fixed (iOS rubber-bands the
   document with plain `overflow: hidden`), touch-panning is confined to the
   results area and the settings sheet, and `overscroll-behavior: contain`

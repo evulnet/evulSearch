@@ -209,14 +209,19 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   After layout toggles call `mapObj.invalidateSize()` guarded by identity check
   `mapObj === m` inside rAF — removed Leaflet maps throw on internals
   (`_leaflet_pos`), and the stubbed map lacks the method; keep both guards.
-- **Mobile tuck + iOS lock (user decision 2026-10):** after any search on
-  <900px, app.js adds `body.tucked` -> header+#tabs hidden (CSS media query;
-  desktop exempt and .tucked never applied there). Reveal: pull-down gesture
-  on #results (touchstart at scrollTop<=0, +70px touchmove; the browser's
-  own pull-to-refresh is dead by design since the document cannot scroll, so
-  the gesture is hand-rolled) or the #tuck-handle chevron (its visibility
-  lives ONLY in the body.tucked CSS rule — no hidden attribute). Resize off
-  mobile auto-untucks. Tuck is runtime-only, never persisted.
+- **Mobile tuck + iOS lock (user decision 2026-10, REVISED same day: chip
+  replaced the pull-down gesture, which felt too much like iOS's own
+  top-pull).** After any search on <900px, app.js adds `body.tucked` ->
+  header+#tabs hidden (CSS media query; desktop exempt and .tucked never
+  applied there). Reveal = #tuck-chip, a `span role=button` (NOT a <button>:
+  `#engines button` selectors everywhere must keep matching ONLY pills)
+  prepended inside #engines by buildEngines (survives innerHTML rebuilds),
+  visible only while tucked; `body.tucked #engines[hidden]{display:flex}`
+  force-shows the row on single-engine servers. Resize off mobile
+  auto-untucks. Tuck is runtime-only, never persisted. iOS focus-zoom is
+  killed by `font-size: calc(1rem / var(--eff-scale,1))` on all fields in a
+  media block AT THE END of style.css (must beat the base #q rule on source
+  order; rendered size is a steady 16px at any ui_scale — do not move it up).
   iOS reality: `overflow:hidden` alone does NOT stop Safari page-pan —
   html AND body are `position: fixed; inset: 0` (zero insets are
   zoom-invariant, so ui_scale stays pixel-exact; body height comes from the

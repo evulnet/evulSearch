@@ -110,21 +110,30 @@ main {
    the tab bar collapse; search box, pills, status and results stay. Pull
    down inside the results area or tap the chevron to reveal. Desktop is
    exempt (media query below), and .tucked is never added there anyway. */
-#tuck-handle {
-  display: none;
-  border: none;
-  background: none;
-  color: var(--muted);
-  font-size: 1.1rem;
-  line-height: 1;
-  padding: 2px 10px 6px;
-  margin: -6px 0 0;
-  cursor: pointer;
-}
+/* The tuck chip rides inside #engines (first child, so left of the pills)
+   and is deliberately NOT pill-shaped: filled accent, fully rounded, brand
+   glyph. While tucked it also force-shows the pill row itself, since a
+   one-engine server keeps that row hidden otherwise. */
+#tuck-chip { display: none; }
 @media (max-width: 899px) {
-  body.tucked #tuck-handle { display: block; }
+  body.tucked #engines[hidden] { display: flex; }
+  body.tucked #tuck-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: none;
+    border-radius: 999px;
+    font-weight: 600;
+    font-style: italic;
+    padding: 5px 12px;
+  }
+  body.tucked #tuck-chip:active { filter: brightness(1.15); }
   body.tucked header,
   body.tucked #tabs { display: none; }
+
 }
 
 /* fixed chrome inside main: only #results scrolls */
@@ -516,4 +525,17 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-top: 4px;
+}
+
+
+/* iOS auto-zooms a focused text field whose RENDERED font-size is < 16px
+   and never zooms back out. html zoom scales all lengths, so divide the
+   effective ui_scale (incl. the mobile 0.75 factor) back out: every text
+   field renders at a steady 16px and iOS stays zoomed-out. Last in the file
+   so it wins over the base #q/#loc/input rules regardless of source order. */
+@media (max-width: 899px) {
+  #q, #loc, input, select, textarea,
+  #search-form #q, .subopts input, .sheet input, .sheet select {
+    font-size: calc(1rem / var(--eff-scale, 1));
+  }
 }

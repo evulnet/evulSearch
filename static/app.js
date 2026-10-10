@@ -146,6 +146,7 @@ function engineForRequest(tab) {
 function buildEngines() {
   const row = $("engines");
   row.innerHTML = "";
+  row.append(tuckChip);  // survives rebuilds; only *visible* while tucked
   const isAns = currentTab === "answers";
   const avail = isAns ? answersBackends() : enginesFor(currentTab);
   const active = isAns ? engineForAnswers() : engineForRequest(currentTab);
@@ -260,26 +261,26 @@ const statusEl = $("status");
 const resultsEl = $("results");
 const goBtn = $("go");
 
-// --- Mobile tuck: brand/tabs collapse after a search; pull down to reveal ---
-// (browser pull-to-refresh is dead by design in a non-scrolling shell, so
-// this is our own gesture; .tucked is only ever applied on mobile widths)
-const tuckHandle = $("tuck-handle");
+// --- Mobile tuck: brand/tabs collapse after a search; the evulSearch chip
+// (left of the engine pills, styled apart from them) reveals them again.
+// No pull gesture on purpose: it read too much like iOS's own top-pull.
+// .tucked is only ever applied on mobile widths. ---
 const isMobileUI = () => window.matchMedia(MOBILE_Q).matches;
 const isTucked = () => document.body.classList.contains("tucked");
 function tuckChrome() { if (isMobileUI()) document.body.classList.add("tucked"); }
 function untuckChrome() { document.body.classList.remove("tucked"); }
-
-tuckHandle.addEventListener("click", untuckChrome);
-let tuckY = null;
-resultsEl.addEventListener("touchstart", (e) => {
-  tuckY = resultsEl.scrollTop <= 0 && e.touches.length === 1
-    ? e.touches[0].clientY : null;
-}, { passive: true });
-resultsEl.addEventListener("touchmove", (e) => {
-  if (tuckY === null || !isTucked() || e.touches.length !== 1) return;
-  if (e.touches[0].clientY - tuckY > 70) { untuckChrome(); tuckY = null; }
-}, { passive: true });
 window.addEventListener("resize", () => { if (!isMobileUI()) untuckChrome(); });
+
+const tuckChip = document.createElement("span");
+tuckChip.id = "tuck-chip";
+tuckChip.setAttribute("role", "button");
+tuckChip.tabIndex = 0;
+tuckChip.setAttribute("aria-label", "Show menu");
+tuckChip.textContent = "\u2315 evulSearch";   // ⌕ brand glyph
+tuckChip.addEventListener("click", untuckChrome);
+tuckChip.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); untuckChrome(); }
+});
 
 async function search(query, tab = currentTab) {
   query = (query || "").trim();
