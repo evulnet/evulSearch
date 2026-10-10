@@ -1192,7 +1192,12 @@ def search():
         altered = web.get("altered_query")
         if altered and altered != query:
             payload["altered_query"] = altered
-    cache_set(ckey, payload, hours)
+    # Empty result sets are NEVER cached: upstreams answer HTTP 200 with zero
+    # hits during transient rate-limits (observed with SearXNG engine
+    # suspensions), and a cached empty makes one bad minute look like a
+    # broken week. Re-querying an honestly-empty query is cheap.
+    if results:
+        cache_set(ckey, payload, hours)
     return jsonify(payload)
 
 

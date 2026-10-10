@@ -296,6 +296,9 @@ or search API is ever contacted from the test suite.
 - Keys live only in the server's environment; they are never sent to the browser.
 - **The server caches queries and their sanitized results** in the SQLite file at
   `cache_db` (queries are therefore visible to anyone with access to that file).
+  Empty result sets are never cached — a transient upstream hiccup (e.g. a
+  SearXNG engine temporarily suspended for rate limits) should cost a retry,
+  not a week of blank pages.
   Expired entries are purged lazily on the next request. Set `cache_hours` and
   `cache_hours_news` to `-1` in `config.json` if you do not want any query
   persistence at all (no database file is even created in that mode).

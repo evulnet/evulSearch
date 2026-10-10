@@ -137,7 +137,10 @@ def test_cache_news_separate_default_off(client, monkeypatch, tmp_path):
 
 def test_cache_news_enabled(client, monkeypatch, tmp_path):
     _enable_cache(tmp_path, monkeypatch, 168, news_hours=6)
-    patch_get(monkeypatch, FakeResp())
+    # non-empty payload: empties are deliberately never cached now
+    patch_get(monkeypatch, FakeResp(payload={"results": [
+        {"title": "H", "url": "https://e.com/1", "description": "d",
+         "age": "1h", "page_age": "2026-10-10"}]}))
     client.get("/api/search?q=fresh&tab=news")
     assert client.get("/api/search?q=fresh&tab=news").get_json().get("cached") is True
 
@@ -1083,3 +1086,18 @@ def test_kagi_news_freshness_is_a_real_cutoff(client, monkeypatch):
     assert [r["title"] for r in rs] == ["recent"]   # stale + undated cut
     rs = client.get("/api/search?q=x&engine=kagi&tab=news").get_json()["results"]
     assert [r["title"] for r in rs] == ["recent", "stale", "undated reference page"]
+
+
+def test_empty_results_are_not_cached(client, monkeypatch, tmp_path):
+    _enable_cache(tmp_path, monkeypatch, hours=1)
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+    calls = {"n": 0}
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls["n"] += 1
+        return FakeResp(payload={"web": {"results": []}})
+    monkeypatch.setattr(appmod.requests, "get", fake_get)
+    r1 = client.get("/api/search?q=nothinghere").get_json()
+    r2 = client.get("/api/search?q=nothinghere").get_json()
+    assert r1.get("results") == [] and r2.get("results") == []
+    assert not r1.get("cached") and not r2.get("cached")
+    assert calls["n"] == 2          # re-ran upstream; empties never stick
