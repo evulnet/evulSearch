@@ -621,3 +621,9 @@ def test_brightdata_safesearch_flags(client, monkeypatch):
     monkeypatch.setattr(appmod.requests, "post", fake_post)
     client.get("/api/search?q=x&engine=google&tab=places&freshness=day")
     assert "tbs=" not in calls2["url"]
+
+
+def test_favicon_served(client):
+    r = client.get("/static/favicon.svg")
+    assert r.status_code == 200
+    assert r.content_type.startswith("image/svg+xml")

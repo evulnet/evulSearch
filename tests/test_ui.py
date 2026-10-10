@@ -446,6 +446,8 @@ def test_mobile_viewport_responsive(browser, app_server):
     page = browser.new_page(viewport={"width": 375, "height": 667})
     page.on("pageerror", lambda e: errors.append(e))
     page.goto(app_server + "/")
+    # phones render at the 75% equivalent (user scale 100 x phone multiplier)
+    assert page.evaluate("document.documentElement.style.zoom") == "0.75"
     page.fill("#q", "mobile")
     page.press("#q", "Enter")
     expect(page.locator("#results li").first).to_contain_text("Web result for mobile")

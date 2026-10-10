@@ -315,6 +315,18 @@ main {
 }
 .site-btn:hover { border-color: var(--accent); }
 
+@media (max-width: 899px) {
+  /* Rigidity: content may wrap, but the page must never scroll sideways. */
+  html, body { overflow-x: clip; }
+  #results li,
+  .answer-text,
+  .place-line,
+  .place-blurb,
+  #status { overflow-wrap: anywhere; }
+  .answer-text pre { overflow-x: auto; max-width: 100%; }
+  #tabs button { padding: 8px 12px; }
+}
+
 @media (min-width: 900px) {
   main { max-width: 1100px; }
 

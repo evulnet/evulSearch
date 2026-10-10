@@ -199,6 +199,10 @@ Bright Data (Google/Bing pills):
 - See “Bright Data-backed searches… can be slow” under Privacy notes for the
   latency/timeout behavior.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

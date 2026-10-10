@@ -139,6 +139,10 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
 
 ## Conventions
 - Single-file Flask app on purpose; keep it that way at this scale.
+- Update CHANGELOG.md with every meaningful change (user requirement 2026-10).
+- Mobile renders at ui_scale x 0.75 (<900px viewport, applyZoom); keep the
+  multiplier when touching zoom. `static/favicon.svg` is served via
+  `<link rel="icon">` — Flask's default /static route serves it.
 - Before any commit: scan `git diff --cached` for secrets/internal addresses; never commit `.env`.
 - Docs (README/AGENTS) must stay abstract — no LAN IPs, hostnames, VPN topology, or key material ever.
 

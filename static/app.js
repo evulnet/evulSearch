@@ -36,12 +36,21 @@ applyTheme(settings.theme);
 
 // Whole-UI zoom (75/100/125/150). CSS `zoom` is standardized in current
 // Chromium/Firefox/Safari and scales px/vh-based styles for free.
+// Phones get an extra 0.75 multiplier (user decision 2026-10: the desktop
+// layout was too chunky for iPhone viewports); the user's ui_scale still
+// layers on top of it.
+const MOBILE_Q = "(max-width: 899px)";
+
 function applyZoom() {
   const s = [75, 100, 125, 150].includes(Number(settings.ui_scale))
     ? Number(settings.ui_scale) : 100;
-  document.documentElement.style.zoom = String(s / 100);
+  const eff = window.matchMedia(MOBILE_Q).matches ? s * 0.75 : s;
+  document.documentElement.style.zoom = String(eff / 100);
 }
 applyZoom();
+try {
+  window.matchMedia(MOBILE_Q).addEventListener("change", applyZoom);
+} catch (e) {}  // older Safari without addEventListener on MediaQueryList
 
 // --- Settings overlay ---
 const overlay = $("settings-overlay");
