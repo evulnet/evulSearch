@@ -16,6 +16,15 @@ Format: latest first; sections `Added / Changed / Fixed`.
 - Mobile rigs: `overflow-x: clip` plus `overflow-wrap: anywhere` on result,
   answer and Places text — the page may wrap, but never scrolls sideways.
 
+### Fixed
+- **Kagi News looked broken:** Kagi returns its news bucket relevance-ranked
+  from a shallow pool, so the tab often opened on months-old items — and the
+  Freshness dropdown was decorative for news (its `tbs` operator is inert
+  there, verified live). The proxy now re-sorts news freshest-first and
+  enforces any chosen Freshness with a true timestamp cutoff server-side
+  (undated reference pages sink to the bottom, and are excluded under a
+  freshness filter). Web-tab freshness still rides `tbs` upstream.
+
 ### Added
 - **Quota-like upstream errors are surfaced to the user** (work in progress):
   when a provider’s error response looks like an exhausted quota/credit/billing

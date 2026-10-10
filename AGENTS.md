@@ -121,8 +121,14 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   (`data.search|news|image`). Snippets carry HTML -> `_strip_tags`; times are
   ISO -> `_rel_age` (unit-covered). Images: `image.url` full +
   `props.thumbnail.url` proxy. Freshness: undocumented-but-live
-  `operators:[["tbs","qdr:x"]]` web/news only; safe via `!safe=` Teletype
-  token appended to the query. Caps = web/news/images (NO places; no local
+  `operators:[["tbs","qdr:x"]]` web only. FRESHNESS REALITY (2026-10,
+  user-reported "Kagi news not working"): `tbs` is INERT for the news
+  workflow (identical results day-vs-none, verified live) and the news
+  bucket is relevance-ranked from a shallow pool -> _kagi_search SORTS news
+  by ISO time desc (untimed sinks last) and, when Freshness is set, applies
+  a true UTC cutoff filter server-side (undated items excluded). Keep
+  sort+cutoff; never re-trust upstream news ordering/freshness. Safe search
+  via `!safe=` Teletype token appended to the query. Caps = web/news/images (NO places; no local
   pack product). PAY-AS-YOU-GO, no free tier — README says so; keep that
   sentence true if the matrix changes. UI engine test includes the Kagi pill:
   clicking pills persists in the context, so the news-step restores Google
