@@ -1040,3 +1040,46 @@ def test_answers_quota_surfaced(client, monkeypatch):
     r = client.post("/api/answer", json={"q": "x"})
     assert r.status_code == 429
     assert "quota or billing limit" in r.get_json()["error"]
+
+
+def test_kagi_news_sorted_freshest_first(client, monkeypatch):
+    _kagi_env(monkeypatch)
+    payload = {"data": {"news": [
+        {"url": "https://n/old", "title": "old", "time": "2026-06-01T00:00:00Z",
+         "props": {"group_id": "n.example"}},
+        {"url": "https://n/fresh", "title": "fresh", "time": "2026-10-10T06:00:00Z",
+         "props": {"group_id": "n.example"}},
+        {"url": "https://n/ref", "title": "evergreen page", "props": {}},
+    ]}}
+    class R:
+        status_code = 200
+        text = "{}"
+        def json(self):
+            return payload
+    monkeypatch.setattr(appmod.requests, "post", lambda *a, **k: R())
+    rs = client.get("/api/search?q=x&engine=kagi&tab=news").get_json()["results"]
+    assert [r["title"] for r in rs] == ["fresh", "old", "evergreen page"]
+
+
+def test_kagi_news_freshness_is_a_real_cutoff(client, monkeypatch):
+    _kagi_env(monkeypatch)
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+    def ago(**kw):
+        return (now - datetime.timedelta(**kw)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = {"data": {"news": [
+        {"url": "1", "title": "recent", "time": ago(hours=5), "props": {}},
+        {"url": "2", "title": "stale", "time": ago(days=40), "props": {}},
+        {"url": "3", "title": "undated reference page", "props": {}},
+    ]}}
+    class R:
+        status_code = 200
+        text = "{}"
+        def json(self):
+            return payload
+    monkeypatch.setattr(appmod.requests, "post", lambda *a, **k: R())
+    rs = client.get("/api/search?q=x&engine=kagi&tab=news&freshness=week")\
+               .get_json()["results"]
+    assert [r["title"] for r in rs] == ["recent"]   # stale + undated cut
+    rs = client.get("/api/search?q=x&engine=kagi&tab=news").get_json()["results"]
+    assert [r["title"] for r in rs] == ["recent", "stale", "undated reference page"]

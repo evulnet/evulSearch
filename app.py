@@ -895,7 +895,23 @@ def _kagi_search(query, tab, count, safesearch, freshness):
         # Kagi error bodies quote the request; scanned, never relayed.
         return None, upstream_error("Kagi", resp.status_code, getattr(resp, "text", ""))
     bucket = {"web": "search", "news": "news", "images": "image"}[tab]
-    return (data.get(bucket) or [])[:count], None
+    items = data.get(bucket) or []
+    if tab == "news":
+        # Kagi's news bucket is relevance-ranked and mixes evergreen pages;
+        # a news tab that opens with 3-month-old items is broken UX. ISO
+        # timestamps sort lexicographically; untimed entries sink to the end.
+        items = sorted(items, key=lambda it: str((it or {}).get("time") or ""),
+                       reverse=True)
+        if freshness in ("day", "week", "month", "year"):
+            # The `tbs` operator is inert for the news workflow (verified
+            # live), so the UI's freshness promise is enforced here instead:
+            # true timestamp cutoff. Undated reference pages are excluded.
+            days = {"day": 1, "week": 7, "month": 30, "year": 365}[freshness]
+            cutoff = (datetime.datetime.now(datetime.timezone.utc)
+                      - datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            items = [it for it in items
+                     if str((it or {}).get("time") or "") >= cutoff]
+    return items[:count], None
 
 
 def _kagi_map(items, tab):

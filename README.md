@@ -327,12 +327,19 @@ Quota-like upstream errors *(work in progress)*:
 Kagi:
 - No Places tab (Kagi has no local-pack product). The pill shows Web/News/
   Images only.
-- News results are Kagi's editorial news bucket: occasionally a reference
-  page slips in without a timestamp — that's upstream, not a parse failure.
+- News comes back relevance-ranked from a sometimes-shallow pool (low-
+  coverage queries surface months-old items; that is Kagi's index, not a
+  parse failure). The proxy therefore **re-sorts news freshest-first** and,
+  when you pick a Freshness value, enforces it with a true timestamp cutoff
+  server-side — the `tbs` operator is inert for the news workflow (verified
+  live). Undated reference pages sink last (and are excluded when a freshness
+  filter is active), so a Kagi news tab never quietly opens on 3-month-old
+  stories.
+- Freshness on the Web tab rides the (undocumented) `tbs` operator — treated
+  as best-effort upstream filtering.
 - Snippets arrive with HTML markup and ISO timestamps; the proxy strips tags
   and converts times to relative ages before the browser ever sees them.
-- Freshness uses the (undocumented but functional) `tbs` operator; safe
-  search uses the `!safe=` Teletype token in the query text.
+- Safe search uses the `!safe=` Teletype token in the query text.
 
 Brave:
 - ≤ 20 results per query; real pagination is not offered (`offset` capped).
