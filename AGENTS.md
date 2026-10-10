@@ -218,6 +218,15 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
 - Before any commit: scan `git diff --cached` for secrets/internal addresses; never commit `.env`.
 - Docs (README/AGENTS) must stay abstract — no LAN IPs, hostnames, VPN topology, or key material ever.
 
+## Runtime state on the dev box (untracked config.json / .env)
+- Live `config.json` sets `provider_quotas: {"kagi": {"per_day": 50}}` —
+  deliberate: Kagi is billed per request with no free tier, so the dev
+  deployment caps spend at 50/day (UTC reset, counted in evulsearch.db
+  provider_usage; verified counting live 2026-10). Keep config.example.json
+  aligned with that sane default. Cache is on (168h); news uncached.
+- All five engines + local answers configured (.env: BRAVE, BRAVE_ANSWERS,
+  BRIGHTDATA key+zone, SERPAPI, SEARCHAPI, KAGI, SEARXNG_URL, LOCAL_CHAT).
+
 ## Known issues / TODOs
 - Cache purge is lazy (on access); an idle server never deletes expired rows.
 - No query caching; every search hits Brave.
