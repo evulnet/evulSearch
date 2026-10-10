@@ -373,7 +373,16 @@ def cache_get(key, hours):
     payload, created, ttl = row
     if ttl > 0 and time.time() - created > ttl * 3600:
         return None  # not yet purged but stale
-    return jsonlib.loads(payload)
+    payload = jsonlib.loads(payload)
+    # Self-heal legacy poison: empty payloads stored before empties stopped
+    # being cached would otherwise look broken for their whole TTL. Drop the
+    # row on read and treat as a miss (re-runs upstream; fresh empties are
+    # not re-stored, so the poison dies on first revisit).
+    if not (payload.get("results") or payload.get("answer")):
+        with _db() as conn:
+            conn.execute("DELETE FROM cache WHERE key = ?", (key,))
+        return None
+    return payload
 
 
 def cache_set(key, payload, hours):

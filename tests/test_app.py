@@ -1101,3 +1101,25 @@ def test_empty_results_are_not_cached(client, monkeypatch, tmp_path):
     assert r1.get("results") == [] and r2.get("results") == []
     assert not r1.get("cached") and not r2.get("cached")
     assert calls["n"] == 2          # re-ran upstream; empties never stick
+
+
+def test_legacy_empty_cache_row_self_heals(client, monkeypatch, tmp_path):
+    _enable_cache(tmp_path, monkeypatch, hours=168)
+    db = str(tmp_path / "cache.db")
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+    # simulate pre-fix poison written directly to the DB
+    appmod.cache_set("search|legacy-poison", {"results": [], "tab": "web"}, 168)
+    calls = {"n": 0}
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls["n"] += 1
+        return FakeResp(payload={"web": {"results": []}})
+    monkeypatch.setattr(appmod.requests, "get", fake_get)
+    with appmod._db() as conn:  # confirm the poison row exists
+        assert conn.execute("SELECT 1 FROM cache WHERE key='search|legacy-poison'").fetchone()
+    r = client.get("/api/search?q=toronto+election&tab=web&engine=searxng")
+    # poison can't be hit by key (keys are hashes); verify the mechanism on
+    # the seeded row itself instead: cache_get must purge and miss it
+    assert appmod.cache_get("search|legacy-poison", 168) is None
+    with appmod._db() as conn:
+        assert not conn.execute("SELECT 1 FROM cache WHERE key='search|legacy-poison'").fetchone()
+    assert not r.get_json().get("cached")  # live query also refuses to serve empty
