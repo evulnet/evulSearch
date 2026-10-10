@@ -260,6 +260,27 @@ const statusEl = $("status");
 const resultsEl = $("results");
 const goBtn = $("go");
 
+// --- Mobile tuck: brand/tabs collapse after a search; pull down to reveal ---
+// (browser pull-to-refresh is dead by design in a non-scrolling shell, so
+// this is our own gesture; .tucked is only ever applied on mobile widths)
+const tuckHandle = $("tuck-handle");
+const isMobileUI = () => window.matchMedia(MOBILE_Q).matches;
+const isTucked = () => document.body.classList.contains("tucked");
+function tuckChrome() { if (isMobileUI()) document.body.classList.add("tucked"); }
+function untuckChrome() { document.body.classList.remove("tucked"); }
+
+tuckHandle.addEventListener("click", untuckChrome);
+let tuckY = null;
+resultsEl.addEventListener("touchstart", (e) => {
+  tuckY = resultsEl.scrollTop <= 0 && e.touches.length === 1
+    ? e.touches[0].clientY : null;
+}, { passive: true });
+resultsEl.addEventListener("touchmove", (e) => {
+  if (tuckY === null || !isTucked() || e.touches.length !== 1) return;
+  if (e.touches[0].clientY - tuckY > 70) { untuckChrome(); tuckY = null; }
+}, { passive: true });
+window.addEventListener("resize", () => { if (!isMobileUI()) untuckChrome(); });
+
 async function search(query, tab = currentTab) {
   query = (query || "").trim();
   if (!query) return;
@@ -279,6 +300,7 @@ async function search(query, tab = currentTab) {
     if (eng !== "brave") u.engine = eng;
     history.pushState(null, "", `/?${new URLSearchParams(u)}`);
   }
+  tuckChrome();  // mobile: reclaim the header/tabs rows the moment we search
 
   try {
     if (tab === "answers") {

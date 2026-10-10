@@ -209,6 +209,21 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   After layout toggles call `mapObj.invalidateSize()` guarded by identity check
   `mapObj === m` inside rAF — removed Leaflet maps throw on internals
   (`_leaflet_pos`), and the stubbed map lacks the method; keep both guards.
+- **Mobile tuck + iOS lock (user decision 2026-10):** after any search on
+  <900px, app.js adds `body.tucked` -> header+#tabs hidden (CSS media query;
+  desktop exempt and .tucked never applied there). Reveal: pull-down gesture
+  on #results (touchstart at scrollTop<=0, +70px touchmove; the browser's
+  own pull-to-refresh is dead by design since the document cannot scroll, so
+  the gesture is hand-rolled) or the #tuck-handle chevron (its visibility
+  lives ONLY in the body.tucked CSS rule — no hidden attribute). Resize off
+  mobile auto-untucks. Tuck is runtime-only, never persisted.
+  iOS reality: `overflow:hidden` alone does NOT stop Safari page-pan —
+  html AND body are `position: fixed; inset: 0` (zero insets are
+  zoom-invariant, so ui_scale stays pixel-exact; body height comes from the
+  insets, the older `calc(100dvh/--eff-scale)` is vestigial but applyZoom
+  still syncs --eff-scale harmlessly). `touch-action: none` on body with
+  `pan-y` allowed only on #results/.sheet/.overlay; `overscroll-behavior:
+  contain` on #results. Pinned by test_ios_style_touch_drag_cannot_pan_page.
 - **Rigid shell (user decision 2026-10):** page never scrolls anywhere;
   `body` is a flex column sized `calc(100dvh / var(--eff-scale, 1))` —
   `applyZoom()` MUST keep that variable in sync with the effective zoom

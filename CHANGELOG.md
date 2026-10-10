@@ -16,6 +16,19 @@ Format: latest first; sections `Added / Changed / Fixed`.
 - Mobile rigs: `overflow-x: clip` plus `overflow-wrap: anywhere` on result,
   answer and Places text — the page may wrap, but never scrolls sideways.
 
+### Added
+- **Mobile tuck:** searching on phones collapses the brand/gear and tab rows
+  for maximum results; pull down inside the results (or tap the chevron) to
+  bring them back. Desktop is untouched.
+
+### Fixed
+- **iOS could still pan the whole page** despite the rigid shell (Safari
+  rubber-bands the document with plain `overflow: hidden`). html and body are
+  now pinned `position: fixed; inset: 0`, touch-panning is restricted to the
+  results area and settings sheet, and `overscroll-behavior: contain` stops
+  inner scrolls chaining outward. Regression-tested with a simulated touch
+  drag.
+
 ### Changed
 - **Fully rigid layout, results-only scrolling (mobile and desktop).** The
   document never scrolls on any viewport: header, tabs, engine pills and the

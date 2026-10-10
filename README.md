@@ -96,6 +96,13 @@ nothing here is sponsored.
   the settings cog, or server-wide by setting `allow_map_embed: false` in
   `config.json` (the option then disappears from the cog entirely). Note the
   privacy implication: OSM tile servers see the mapped area and visitor IPs.
+- **Mobile tuck**: on phones, a search collapses the brand/gear row and the
+  tab bar so results own the screen; pull down inside the results (or tap
+  the ⌄ chevron) to reveal them. Desktop never tucks.
+- **iOS hard-lock**: `html`/`body` are pinned fixed (iOS rubber-bands the
+  document with plain `overflow: hidden`), touch-panning is confined to the
+  results area and the settings sheet, and `overscroll-behavior: contain`
+  stops inner bounces chaining out.
 - **Rigid app shell**: the page itself never scrolls on any device. Header,
   tabs, engine pills and the search bar are always on screen (top-pinned by
   construction), and vertical scrolling happens only inside the results area —

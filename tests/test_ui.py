@@ -588,6 +588,8 @@ def test_rigid_shell_page_never_scrolls(browser, app_server):
         page.fill("#q", "hello")
         page.press("#q", "Enter")
         expect(page.locator("#results li").first).to_be_visible()
+        # mobile tucks its chrome by design after a search: reveal it first
+        page.evaluate("document.body.classList.remove('tucked')")
         se = page.evaluate("document.scrollingElement.scrollHeight")
         ch = page.evaluate("document.scrollingElement.clientHeight")
         assert se <= ch + 1, f"page scrolls at {vw}x{vh}: {se} > {ch}"
@@ -614,3 +616,76 @@ def test_rigid_shell_page_never_scrolls(browser, app_server):
         # chrome stays pinned: tabs visible after max results scroll
         assert page.locator("#tabs").is_visible()
         ctx.close()
+
+
+def test_mobile_tuck_and_reveal(browser, app_server):
+    ctx = browser.new_context(viewport={"width": 390, "height": 844},
+                              has_touch=True, is_mobile=True)
+    page = ctx.new_page()
+    page.goto(app_server + "/")
+    expect(page.locator("header")).to_be_visible()   # welcome state: full chrome
+    page.fill("#q", "hello")
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_be_visible()
+    # tucked on mobile after search
+    expect(page.locator("header")).to_be_hidden()
+    expect(page.locator("#tabs")).to_be_hidden()
+    expect(page.locator("#tuck-handle")).to_be_visible()
+    # chevron reveals
+    page.click("#tuck-handle")
+    expect(page.locator("header")).to_be_visible()
+    # search again, then real pull-down gesture reveals
+    page.press("#q", "Enter")
+    expect(page.locator("header")).to_be_hidden()
+    page.evaluate("""() => {
+      const el = document.getElementById('results');
+      const mk = (type, y) => new TouchEvent(type, { touches:
+        [new Touch({ identifier: 1, target: el, clientY: y })] });
+      el.dispatchEvent(mk('touchstart', 100));
+      el.dispatchEvent(mk('touchmove', 200));
+    }""")
+    expect(page.locator("header")).to_be_visible()
+    ctx.close()
+
+
+def test_desktop_never_tucks(browser, app_server):
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+    page = ctx.new_page()
+    page.goto(app_server + "/")
+    page.fill("#q", "hello")
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_be_visible()
+    expect(page.locator("header")).to_be_visible()
+    expect(page.locator("#tuck-handle")).to_be_hidden()
+    assert page.evaluate("document.body.classList.contains('tucked')") is False
+    ctx.close()
+
+
+def test_ios_style_touch_drag_cannot_pan_page(browser, app_server):
+    # Regression: iOS Safari rubber-bands the document with only
+    # overflow:hidden — the shell pins html/body fixed instead. A hard touch
+    # drag must move #results, never the document.
+    ctx = browser.new_context(viewport={"width": 390, "height": 844},
+                              has_touch=True, is_mobile=True)
+    page = ctx.new_page()
+    page.goto(app_server + "/")
+    page.fill("#q", "hello")
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_be_visible()
+    assert page.evaluate("""async () => {
+      const el = document.getElementById('results');
+      const mk = (t, y) => new TouchEvent(t, { bubbles: true, cancelable: true,
+        touches: t === 'touchend' ? [] :
+          [new Touch({ identifier: 1, target: el, clientY: y })] });
+      el.dispatchEvent(mk('touchstart', 300));
+      for (const y of [420, 540, 660]) el.dispatchEvent(mk('touchmove', y));
+      el.dispatchEvent(mk('touchend', 660));
+      await new Promise(r => setTimeout(r, 100));
+      return document.scrollingElement.scrollTop === 0 && window.scrollY === 0;
+    }""") is True
+    # the pinned-shell CSS is present (guards against silent regressions)
+    assert page.evaluate(
+        "getComputedStyle(document.body).position") == "fixed"
+    assert page.evaluate("getComputedStyle(document.getElementById('results'))"
+                         ".overscrollBehaviorY") == "contain"
+    ctx.close()
