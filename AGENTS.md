@@ -141,8 +141,10 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
 - Single-file Flask app on purpose; keep it that way at this scale.
 - Update CHANGELOG.md with every meaningful change (user requirement 2026-10).
 - Mobile renders at ui_scale x 0.75 (<900px viewport, applyZoom); keep the
-  multiplier when touching zoom. `static/favicon.svg` is served via
-  `<link rel="icon">` — Flask's default /static route serves it.
+  multiplier when touching zoom. Favicon set: `static/favicon.svg` is the
+  source of truth; PNGs are rasterizations (regenerate: render the SVG in a
+  data-URI `<img>` under Playwright Chromium at 32/192/180 and screenshot).
+  Safari needs the PNG/apple-touch-icon — do not delete them.
 - Before any commit: scan `git diff --cached` for secrets/internal addresses; never commit `.env`.
 - Docs (README/AGENTS) must stay abstract — no LAN IPs, hostnames, VPN topology, or key material ever.
 

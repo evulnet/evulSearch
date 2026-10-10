@@ -627,3 +627,11 @@ def test_favicon_served(client):
     r = client.get("/static/favicon.svg")
     assert r.status_code == 200
     assert r.content_type.startswith("image/svg+xml")
+
+
+def test_favicon_png_served(client):
+    # Safari ignores SVG favicons; the PNG + apple-touch-icon are the real deal
+    for path in ("/static/favicon-32.png", "/static/favicon-192.png",
+                 "/static/apple-touch-icon.png"):
+        r = client.get(path)
+        assert r.status_code == 200 and r.content_type == "image/png", path

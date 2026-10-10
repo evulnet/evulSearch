@@ -6,8 +6,12 @@ Format: latest first; sections `Added / Changed / Fixed`.
 ## Unreleased — 2026-10 (mobile & branding)
 
 ### Added
-- Favicon: inline SVG “evil magnifier” (`static/favicon.svg`), served via
-  `<link rel="icon">`; no binary assets in the repo.
+- Favicon: “evil magnifier” mark in SVG (`static/favicon.svg`) plus PNG
+  renditions (`favicon-32.png`, `favicon-192.png`, `apple-touch-icon.png`,
+  rasterized from the SVG via headless Chromium). Safari supports no SVG
+  favicons at all and showed a letter placeholder — the PNG +
+  `apple-touch-icon` links fix tab bars and iOS home-screen icons; the SVG
+  link stays for browsers that prefer it.
 - `CHANGELOG.md` (this file) — keep it updated with every meaningful change.
 - Mobile rigs: `overflow-x: clip` plus `overflow-wrap: anywhere` on result,
   answer and Places text — the page may wrap, but never scrolls sideways.
