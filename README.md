@@ -307,6 +307,23 @@ or search API is ever contacted from the test suite.
 
 ## Known API limits (verified live)
 
+Quota-like upstream errors *(work in progress)*:
+- When a provider says it is out of quota, credits, or billing, the search
+  fails with **“<provider>: quota or billing limit reached upstream”** and
+  HTTP 429, instead of an opaque “HTTP 400/402” note. Vendors do not agree on
+  what that response looks like, so this is heuristic: we treat HTTP 402/429
+  as quota, plus a deliberately narrow phrase scan of the error body
+  (“quota”, “credits”, “no searches left”, “payment required”, …). The body
+  itself is still never relayed — only the classification.
+- Being a work in progress in both directions: false positives (a 429 that is
+  really a temporary rate limit gets the quota wording) and false negatives
+  (a quota failure wrapped in a plain 400 without the known phrases looks
+  like a generic error) are both possible. If you see one mislabeled, note
+  the provider and HTTP status — the whole classifier is one small table in
+  `app.py` meant to be tuned as real failures are observed.
+- Local quota you set yourself via `provider_quotas` is *not* this heuristic:
+  those 429s are exact and always fall through to your other providers first.
+
 Kagi:
 - No Places tab (Kagi has no local-pack product). The pill shows Web/News/
   Images only.

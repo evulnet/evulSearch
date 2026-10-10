@@ -496,7 +496,7 @@ def _brightdata_serp(query, engine, tab, count, safesearch, freshness):
     except requests.RequestException:
         return None, "Could not reach Bright Data SERP API."
     if resp.status_code != 200:
-        return None, f"Bright Data error (HTTP {resp.status_code})."
+        return None, upstream_error("Bright Data SERP", resp.status_code, getattr(resp, "text", ""))
     try:
         data = resp.json()
     except ValueError:
@@ -586,6 +586,43 @@ def _bd_map(items, tab):
     return out
 
 
+# --- Upstream error classification (best-effort; see README "Quota-like
+# errors") ---
+# Vendors do not agree on a quota signal, so we sniff status codes and a
+# deliberately narrow phrase list from the (NEVER relayed) error body. This
+# is a work in progress: tune the lists below as real failures are observed.
+_QUOTA_STATUSES = (402, 429)
+_QUOTA_PHRASES = (
+    "quota", "credits", "credit balance", "insufficient balance",
+    "out of credit", "searches left", "no searches", "account limit",
+    "monthly limit", "limit exceeded", "limit reached", "exceeded your",
+    "upgrade your", "payment required", "billing",
+)
+
+
+def upstream_error(vendor, status, body=""):
+    """User-safe error string for a non-200 upstream response.
+
+    Bodies are scanned for quota signatures but NEVER included in the
+    returned message (they can quote requests/keys). Quota messages always
+    contain QUOTA_SENTINEL so endpoints can map them to HTTP 429.
+    """
+    low = str(body or "")[:4000].lower()
+    if status in _QUOTA_STATUSES or any(p in low for p in _QUOTA_PHRASES):
+        return (f"{vendor}: QUOTA_SENTINEL quota or billing limit reached "
+                "upstream — free tiers reset monthly; otherwise your admin "
+                "must check the provider dashboard.")
+    return f"{vendor} error (HTTP {status})."
+
+
+QUOTA_SENTINEL = "QUOTA_SENTINEL"
+
+
+def error_status(err, default=502):
+    """Map a fetcher error string to the HTTP status we hand the browser."""
+    return 429 if QUOTA_SENTINEL in err else default
+
+
 def _serpapi_search(query, engine, tab, count, safesearch, freshness):
     """Results via SerpApi. Returns (items, error); one is non-None."""
     if engine != "google":
@@ -616,8 +653,8 @@ def _serpapi_search(query, engine, tab, count, safesearch, freshness):
     except ValueError:
         data = {}
     if resp.status_code != 200:
-        # SerpApi error bodies can quote the request; relay only the status.
-        return None, f"SerpApi error (HTTP {resp.status_code})."
+        # SerpApi error bodies can quote the request; scanned, never relayed.
+        return None, upstream_error("SerpApi", resp.status_code, getattr(resp, "text", ""))
     if tab == "places":
         lr = data.get("local_results") or {}
         items = lr.get("places") if isinstance(lr, dict) else lr
@@ -731,8 +768,8 @@ def _searchapi_search(query, engine, tab, count, safesearch, freshness):
     except ValueError:
         data = {}
     if resp.status_code != 200:
-        # Upstream error bodies can quote the request; relay only the status.
-        return None, f"SearchApi error (HTTP {resp.status_code})."
+        # Upstream error bodies can quote the request; scanned, never relayed.
+        return None, upstream_error("SearchApi", resp.status_code, getattr(resp, "text", ""))
     if tab == "places":
         lr = data.get("local_results") or []
         items = lr.get("places") if isinstance(lr, dict) else lr
@@ -855,8 +892,8 @@ def _kagi_search(query, tab, count, safesearch, freshness):
     except ValueError:
         data = {}
     if resp.status_code != 200:
-        # Kagi error bodies quote the request; relay only the status.
-        return None, f"Kagi error (HTTP {resp.status_code})."
+        # Kagi error bodies quote the request; scanned, never relayed.
+        return None, upstream_error("Kagi", resp.status_code, getattr(resp, "text", ""))
     bucket = {"web": "search", "news": "news", "images": "image"}[tab]
     return (data.get(bucket) or [])[:count], None
 
@@ -907,7 +944,7 @@ def _searx_search(query, tab, count, safesearch, freshness):
         return None, ("SearXNG refused JSON (enable formats: [json] "
                       "in its settings.yml).")
     if resp.status_code != 200:
-        return None, f"SearXNG error (HTTP {resp.status_code})."
+        return None, upstream_error("SearXNG", resp.status_code, getattr(resp, "text", ""))
     try:
         data = resp.json()
     except ValueError:
@@ -1043,7 +1080,7 @@ def search():
         else:
             items, err = _brightdata_serp(qparam, engine, tab, count, safesearch, freshness_raw)
         if err:
-            return jsonify(error=err), 502
+            return jsonify(error=err), error_status(err)
         if provider == "serpapi":
             results = _serpapi_map(items, tab)
         elif provider == "searchapi":
@@ -1077,8 +1114,9 @@ def search():
         return jsonify(error="Could not reach Brave Search."), 502
 
     if resp.status_code != 200:
-        # Do not relay Brave's body verbatim; only the status is safe to show.
-        return jsonify(error=f"Brave Search error (HTTP {resp.status_code})."), 502
+        # Brave's body is scanned for quota signals but never relayed.
+        err = upstream_error("Brave Search", resp.status_code, getattr(resp, "text", ""))
+        return jsonify(error=err), error_status(err)
 
     try:
         data = resp.json()
@@ -1209,8 +1247,9 @@ def answer():
     except ValueError:
         data = {}
     if resp.status_code != 200:
-        # Upstream error bodies may carry internals; relay only the status.
-        return jsonify(error=f"{who} error (HTTP {resp.status_code})."), 502
+        # Upstream error bodies may carry internals; scanned, never relayed.
+        err = upstream_error(who, resp.status_code, getattr(resp, "text", ""))
+        return jsonify(error=err), error_status(err)
 
     try:
         msg = data["choices"][0]["message"]

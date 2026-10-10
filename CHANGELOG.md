@@ -17,6 +17,14 @@ Format: latest first; sections `Added / Changed / Fixed`.
   answer and Places text — the page may wrap, but never scrolls sideways.
 
 ### Added
+- **Quota-like upstream errors are surfaced to the user** (work in progress):
+  when a provider’s error response looks like an exhausted quota/credit/billing
+  limit (HTTP 402/429 or a narrow phrase scan of the body — never relayed),
+  the search fails with “<provider>: quota or billing limit reached upstream”
+  and HTTP 429 instead of an opaque status note. Heuristics are centralized in
+  one table in app.py and will be tuned as real-world failures are observed
+  (README documents the WIP status and both failure modes).
+### Added
 - **Kagi provider** (`KAGI_KEY`): a Kagi engine pill backed by Kagi's own
   premium index — Web, News and Images (no Places; Kagi has no local pack).
   POST API with a `workflow` body field; snippets are stripped of upstream

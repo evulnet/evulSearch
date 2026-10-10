@@ -127,6 +127,17 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   sentence true if the matrix changes. UI engine test includes the Kagi pill:
   clicking pills persists in the context, so the news-step restores Google
   before the Places step.
+- **Quota-like upstream error surfacing (WIP by design, user decision
+  2026-10):** one classifier — `upstream_error(vendor, status, body)` +
+  `_QUOTA_STATUSES`/`_QUOTA_PHRASES` in app.py. Every non-200 provider path
+  (search + answers) runs through it; quota matches get the sentinel phrase
+  (QUOTA_SENTINEL constant) and endpoints map them to HTTP 429 via
+  `error_status()`. Bodies are scanned but NEVER relayed (privacy design
+  unchanged). The lists are INTENTIONALLY heuristic — when a real mislabeled
+  failure is observed, tune the two tables, don't scatter conditionals. Old
+  tests using 429 as a generic error status were updated to 500 (429 now
+  means quota). SearXNG's 403 json-disabled hint stays specific (checked
+  before the classifier).
 - **SearchApi.io provider (`SEARCHAPI_KEY` — NOT `DUCKDUCKGO_KEY`, user
   corrected the naming twice: it is a commercial SERP vendor, zero-retention
   is enterprise-only, do NOT brand it privacy-forward; there is no official

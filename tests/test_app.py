@@ -427,10 +427,10 @@ def test_brave_error_is_not_relayed(client, monkeypatch):
             return {"error": "internal detail"}
 
     monkeypatch.setattr(appmod.requests, "get",
-                        lambda *a, **k: Boom(status_code=429))
+                        lambda *a, **k: Boom(status_code=500))
     r = client.get("/api/search?q=x")
     assert r.status_code == 502
-    assert "429" in r.get_json()["error"]
+    assert "500" in r.get_json()["error"]
     assert "internal detail" not in json.dumps(r.get_json())
 
 
@@ -526,13 +526,14 @@ def test_answer_upstream_error_status_only(client, monkeypatch):
     monkeypatch.setattr(appmod, "ANSWERS_KEY", "akey")
 
     class R:
-        status_code = 429
+        status_code = 500
+        text = '{"error": {"code": "INTERNAL", "detail": "internal-blob"}}'
         def json(self):
-            return {"error": {"code": "RATE_LIMITED", "detail": "internal-blob"}}
+            return {"error": {"code": "INTERNAL", "detail": "internal-blob"}}
 
     monkeypatch.setattr(appmod.requests, "post", lambda *a, **k: R())
     body = client.post("/api/answer", json={"q": "x"}).get_json()
-    assert "429" in body["error"]
+    assert "500" in body["error"]
     assert "internal-blob" not in body["error"] and "RATE_LIMITED" not in body["error"]
 
 
@@ -974,3 +975,68 @@ def test_kagi_error_status_only(client, monkeypatch):
     monkeypatch.setattr(appmod.requests, "post", fake_post)
     body = client.get("/api/search?q=x&engine=kagi").get_json()
     assert body["error"] == "Kagi error (HTTP 401)."   # body never relayed
+
+
+# --- quota-like upstream error surfacing (WIP heuristics) ---
+
+class _R:
+    def __init__(self, status, text="{}"):
+        self.status_code = status
+        self.text = text
+    def json(self):
+        return json.loads(self.text)
+
+
+def _fake_upstream(monkeypatch, resp):
+    monkeypatch.setattr(appmod.requests, "get", lambda *a, **k: resp)
+    monkeypatch.setattr(appmod.requests, "post", lambda *a, **k: resp)
+
+
+def test_brave_429_surfaces_quota(client, monkeypatch):
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+    _fake_upstream(monkeypatch, _R(429, '{"detail":"Quota exceeded"}'))
+    r = client.get("/api/search?q=x")
+    assert r.status_code == 429
+    assert "quota or billing limit" in r.get_json()["error"]
+    assert "Quota exceeded" not in r.get_json()["error"]  # body never relayed
+
+
+def test_brave_500_stays_status_only(client, monkeypatch):
+    _fake_upstream(monkeypatch, _R(500, '{"detail":"internal"}'))
+    r = client.get("/api/search?q=x")
+    assert r.status_code == 502
+    assert r.get_json()["error"] == "Brave Search error (HTTP 500)."
+
+
+def test_phrase_only_quota_detection_400(client, monkeypatch):
+    # vendor returns 400 but body clearly says the meter is empty
+    _serp_env(monkeypatch)
+    _fake_upstream(monkeypatch, _R(400, '{"error":"You have no searches left"}'))
+    r = client.get("/api/search?q=x&engine=google")
+    assert r.status_code == 429
+    assert "SerpApi" in r.get_json()["error"] and "quota or billing limit" in r.get_json()["error"]
+
+
+def test_kagi_402_is_quota(client, monkeypatch):
+    _kagi_env(monkeypatch)
+    _fake_upstream(monkeypatch, _R(402, "payment required"))
+    r = client.get("/api/search?q=x&engine=kagi")
+    assert r.status_code == 429 and "quota or billing limit" in r.get_json()["error"]
+
+
+def test_brightdata_429_is_quota(client, monkeypatch):
+    monkeypatch.setattr(appmod, "BD_KEY", "bk")
+    monkeypatch.setattr(appmod, "BD_ZONE", "bz")
+    _fake_upstream(monkeypatch, _R(429, "not enough credits"))
+    r = client.get("/api/search?q=x&engine=google")
+    assert r.status_code == 429 and "Bright Data" in r.get_json()["error"]
+
+
+def test_answers_quota_surfaced(client, monkeypatch):
+    monkeypatch.setattr(appmod, "LOCAL_CHAT_URL", "http://local.test/v1")
+    monkeypatch.setattr(appmod, "LOCAL_CHAT_KEY", "")
+    monkeypatch.setattr(appmod, "LOCAL_CHAT_MODEL", "m")
+    _fake_upstream(monkeypatch, _R(429, '{"error":{"message":"insufficient balance"}}'))
+    r = client.post("/api/answer", json={"q": "x"})
+    assert r.status_code == 429
+    assert "quota or billing limit" in r.get_json()["error"]
