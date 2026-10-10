@@ -1,0 +1,229 @@
+"""Shared fixtures: mock Brave upstream + real app.py subprocess for UI tests."""
+import json
+import socket
+import subprocess
+import sys
+import threading
+from pathlib import Path
+
+import pytest
+from flask import Flask, jsonify, request
+
+ROOT = Path(__file__).resolve().parent.parent
+
+MOCK_KEY = "MOCK-BRAVE-KEY-do-not-ship"
+MOCK_ANSWERS_KEY = "MOCK-BRAVE-ANSWERS-KEY-do-not-ship"
+
+
+def _free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def make_mock_brave():
+    """Deterministic stand-in for the Brave API (mirrors its real quirks)."""
+    app = Flask("mock_brave")
+
+    @app.get("/res/v1/web/search")
+    def web():
+        q = request.args.get("q", "")
+        return jsonify(results={"web": {"results": [
+            {"title": f"Web result for {q}", "url": "https://example.com/1",
+             "description": "<b>bold</b> snippet", "age": "1 day ago"},
+            {"title": "Second web result", "url": "https://example.com/2",
+             "description": "plain", "age": ""},
+        ]}})
+
+    @app.get("/res/v1/news/search")
+    def news():
+        q = request.args.get("q", "")
+        return jsonify(results=[
+            {"title": f"News headline for {q}", "url": "https://news.example/1",
+             "description": "news snippet", "age": "2 hours ago"},
+        ])
+
+    @app.get("/res/v1/images/search")
+    def images():
+        if request.args.get("safesearch") not in ("off", "strict"):
+            return jsonify(error="bad safesearch enum"), 422  # mirrors real Brave
+        return jsonify(results=[
+            {"title": "Fox picture", "url": "https://img.example/1",
+             "source": "img.example",
+             # origin served by the mock itself: deterministic, offline-safe
+             "properties": {"url": request.url_root + "fox-fullres.jpg"},
+             "thumbnail": {"src": "https://picsum.photos/seed/fox/200/200"}},
+        ])
+
+    @app.get("/fox-fullres.jpg")
+    def fox_fullres():
+        # 1x1 transparent PNG
+        import base64
+        return app.response_class(
+            base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+                "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="),
+            mimetype="image/png")
+
+    @app.get("/v1/models")
+    def llm_models():
+        return jsonify(data=[{"id": "mock-model"}])
+
+    @app.post("/v1/chat/completions")
+    def llm_chat():
+        body = request.get_json(force=True)
+        assert body.get("model") == "mock-model"
+        q = (body.get("messages") or [{}])[-1].get("content", "")
+        return jsonify(choices=[{"message": {"role": "assistant",
+                                "content": f"Local answer for {q}: 42."}}])
+
+    @app.post("/request")
+    def bd_request():
+        from urllib.parse import urlparse, parse_qs
+        payload = request.get_json(force=True)
+        assert request.headers.get("authorization") == "Bearer MOCK-BD-KEY"
+        assert payload.get("zone") == "testzone"
+        url = payload["url"]
+        q = parse_qs(urlparse(url).query).get("q", [""])[0]
+        if "tbm=nws" in url:
+            return jsonify(news=[
+                {"title": f"BD news for {q}", "link": "https://bd.example/n1",
+                 "description": "news snippet", "source": "bd.example",
+                 "time": "2 hours ago"},
+            ])
+        if "tbm=lcl" in url:
+            return jsonify(snack_pack=[
+                {"cid": "123", "name": f"BD place for {q}", "rating": 4.5,
+                 "reviews_cnt": 123, "type": "ramen",
+                 "address": "1 Test St", "image": "data:image/jpeg;base64,XX"},
+                {"cid": "456", "name": "Second BD place", "type": "izakaya",
+                 "address": "2 Test St"},
+            ])
+        if "tbm=isch" in url:
+            return jsonify(images=[
+                {"original_image": "https://bd.example/i1.jpg",
+                 "image_alt": f"BD image {q}", "image": "data:image/jpeg;base64,BLOB",
+                 "link": "https://google.com/goto?url=JUNK"},
+                {"image_alt": "no original skipped"},
+            ])
+        return jsonify(organic=[
+            {"title": f"BD result for {q}", "link": "https://bd.example/1",
+             "description": "bd &amp; one", "display_link": "bd.example"},
+            {"title": "Second BD result", "link": "https://bd.example/2",
+             "description": "bd two", "display_link": "bd.example"},
+        ])
+
+    @app.post("/res/v1/chat/completions")
+    def answers():
+        if request.headers.get("x-subscription-token") != MOCK_ANSWERS_KEY:
+            return jsonify(error="bad key"), 401
+        body = request.get_json()
+        q = body["messages"][0]["content"]
+        md = (f"# Mock answer for: {q}\n\n"
+              f"It is **bold** and *shifty* with `code`.\n\n"
+              f"- point one\n- point two\n\n"
+              f"See [details](https://cite.example/3). "
+              f"<script>bad()</script> stays text.")
+        payload = {
+            "model": "brave-pro",
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {
+                "role": "assistant",
+                "content": md,
+            }}],
+            "citations": ["https://cite.example/1", "https://cite.example/2"],
+        }
+        return jsonify(payload)
+
+    @app.get("/res/v1/local/place_search")
+    def places():
+        q = request.args.get("q", "")
+        lat, lon = request.args.get("latitude"), request.args.get("longitude")
+        near = f" near {lat},{lon}" if lat and lon else ""
+        return jsonify(results=[
+            {"title": f"Pizza place for {q}{near}", "url": "https://place.example",
+             "description": "Wood-fired slices, cozy interior",
+             "postal_address": {"displayAddress": "123 Main St"},
+             "contact": {"telephone": "+000 000 000"},
+             "opening_hours": {"current_day": [
+                 {"full_name": "Saturday", "opens": "12:30", "closes": "00:30"}]},
+             "pictures": [{"results": [{"src": request.url_root + "place.jpg"}]}],
+             "coordinates": [37.9, 23.7], "categories": ["pizza"]},
+            {"title": f"Second place for {q}{near}",  # no url: must not be a link
+             "postal_address": {"displayAddress": "45 Side St"},
+             "coordinates": [37.95, 23.75], "categories": ["cafe"]},
+        ])
+
+    @app.get("/place.jpg")
+    def place_img():
+        import base64
+        return app.response_class(
+            base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+                "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="),
+            mimetype="image/png")
+
+    return app
+
+
+@pytest.fixture(scope="session")
+def mock_brave():
+    port = _free_port()
+    app = make_mock_brave()
+    t = threading.Thread(
+        target=lambda: app.run(port=port, host="127.0.0.1", threaded=True),
+        daemon=True,
+    )
+    t.start()
+    import time
+    import urllib.request
+    for _ in range(50):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/res/v1/web/search?q=x", timeout=1)
+            break
+        except Exception:
+            time.sleep(0.1)
+    yield f"http://127.0.0.1:{port}/res/v1"
+
+
+@pytest.fixture(scope="session")
+def app_server(mock_brave, tmp_path_factory):
+    import os
+    import time
+    import urllib.request
+    # hermetic config: cache off, db in tmp (never touches the developer's files)
+    cfg = tmp_path_factory.mktemp("cfg") / "config.json"
+    cfg.write_text(json.dumps({"cache_hours": -1, "cache_hours_news": -1,
+                               "allow_map_embed": True,
+                               "cache_db": str(cfg.parent / "ui-tests.db")}))
+    port = _free_port()
+    env = {
+        **os.environ,
+        "BRAVE_API_KEY": MOCK_KEY,
+        "BRAVE_ANSWERS_KEY": MOCK_ANSWERS_KEY,
+        "BRAVE_BASE": mock_brave,
+        "BRIGHTDATA_SERP_API_KEY": "MOCK-BD-KEY",
+        "BRIGHTDATA_SERP_ZONE": "testzone",
+        "BRIGHTDATA_API_URL": mock_brave.removesuffix("/res/v1") + "/request",
+        "LOCAL_CHAT_BASE_URL": mock_brave.removesuffix("/res/v1") + "/v1",
+        "EVUL_CONFIG_PATH": str(cfg),
+        "HOST": "127.0.0.1",
+        "PORT": str(port),
+    }
+    proc = subprocess.Popen(
+        [sys.executable, str(ROOT / "app.py")],
+        cwd=ROOT, env=env,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)
+                break
+            except Exception:
+                time.sleep(0.1)
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)

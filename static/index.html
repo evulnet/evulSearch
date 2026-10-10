@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>evulSearch</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Apply theme before first paint to avoid a flash.
+    (function () {
+      var s = {};
+      try { s = JSON.parse(localStorage.getItem("settings") || "{}"); } catch (e) {}
+      var t = s.theme || "auto";
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    })();
+  </script>
+</head>
+<body>
+  <header>
+    <span class="brand">evulSearch</span>
+    <button id="gear" class="icon-btn" aria-label="Settings" title="Settings">⚙</button>
+  </header>
+
+  <main>
+    <nav id="tabs">
+      <button type="button" data-tab="web" class="active">Web</button>
+      <button type="button" data-tab="answers">Answers</button>
+      <button type="button" data-tab="news">News</button>
+      <button type="button" data-tab="images">Images</button>
+      <button type="button" data-tab="places">Places</button>
+    </nav>
+
+    <div id="engines" class="pillrow" hidden aria-label="Web search engine"></div>
+
+    <div id="places-opts" class="subopts" hidden>
+      <input id="loc" type="text" autocomplete="off" maxlength="200"
+             placeholder="Location override, e.g. Tokyo, Japan (empty = use settings)"
+             aria-label="Places location override">
+    </div>
+
+    <form id="search-form" role="search">
+      <input id="q" type="search" autocomplete="off" autofocus
+             placeholder="Search the web" aria-label="Search query">
+      <button id="go" type="submit">Go</button>
+    </form>
+
+    <div id="workspace" class="workspace">
+      <div id="status" aria-live="polite"></div>
+      <div id="map" class="mapbox" hidden></div>
+      <ol id="results"></ol>
+    </div>
+  </main>
+
+  <div id="settings-overlay" class="overlay" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="sheet-head">
+        <h2>Settings</h2>
+        <button id="close-settings" class="icon-btn" aria-label="Close settings">✕</button>
+      </div>
+
+      <h3 class="set-h">Appearance</h3>
+      <label class="row">
+        <span>Theme</span>
+        <select id="theme">
+          <option value="auto">Auto (system)</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <label class="row">
+        <span>UI scale</span>
+        <select id="ui_scale">
+          <option value="75">75%</option>
+          <option value="100">100%</option>
+          <option value="125">125%</option>
+          <option value="150">150%</option>
+        </select>
+      </label>
+
+      <h3 class="set-h">Search tools</h3>
+      <label class="row">
+        <span>Safe search <em id="ss-note" hidden class="note">(images: on/off only)</em></span>
+        <select id="safesearch">
+          <option value="strict">Strict</option>
+          <option value="moderate">Moderate</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label class="row">
+        <span>Results per search</span>
+        <select id="count">
+          <option value="5">5</option>
+          <option value="10">10</option>
+          <option value="20">20</option>
+        </select>
+      </label>
+      <label class="row">
+        <span>Time filter</span>
+        <select id="freshness">
+          <option value="any">Any time</option>
+          <option value="day">Past day</option>
+          <option value="week">Past week</option>
+          <option value="month">Past month</option>
+          <option value="year">Past year</option>
+        </select>
+      </label>
+      <label class="row">
+        <span>Spell check <em class="note">(web results)</em></span>
+        <input type="checkbox" id="spellcheck">
+      </label>
+
+      <h3 class="set-h answers-only">Answers</h3>
+      <label class="row answers-only">
+        <span>Enable Answers tab</span>
+        <input type="checkbox" id="enabled_answers">
+      </label>
+      <label class="row answers-only">
+        <span>Answers time filter</span>
+        <select id="answers_freshness">
+          <option value="any">Any time</option>
+          <option value="day">Past day</option>
+          <option value="week">Past week</option>
+          <option value="month">Past month</option>
+          <option value="year">Past year</option>
+        </select>
+      </label>
+
+      <h3 class="set-h">Tabs</h3>
+      <label class="row">
+        <span>News</span>
+        <input type="checkbox" id="enabled_news">
+      </label>
+      <label class="row">
+        <span>Images</span>
+        <input type="checkbox" id="enabled_images">
+      </label>
+      <label class="row">
+        <span>Places</span>
+        <input type="checkbox" id="enabled_places">
+      </label>
+      <label class="row">
+        <span>Use my location for Places <em class="note">(browser prompt; used per request, never stored)</em></span>
+        <input type="checkbox" id="places_location">
+      </label>
+      <label class="row map-embed-only">
+        <span>Show embedded map <em class="note">(loads third-party OpenStreetMap tiles; also requires server opt-in)</em></span>
+        <input type="checkbox" id="map_embed" disabled>
+      </label>
+      <label class="row row-col">
+        <span>Preset Places location <em class="note">(used when “use my location” is off)</em></span>
+        <input type="text" id="places_preset" maxlength="200" autocomplete="off" placeholder="e.g. Tokyo, Japan">
+      </label>
+
+      <p class="hint">Shortcuts: / focuses search, &uarr;&darr; move through results. Settings autosave (marked in green).</p>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
