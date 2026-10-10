@@ -24,7 +24,6 @@ Format: latest first; sections `Added / Changed / Fixed`.
   and HTTP 429 instead of an opaque status note. Heuristics are centralized in
   one table in app.py and will be tuned as real-world failures are observed
   (README documents the WIP status and both failure modes).
-### Added
 - **Kagi provider** (`KAGI_KEY`): a Kagi engine pill backed by Kagi's own
   premium index — Web, News and Images (no Places; Kagi has no local pack).
   POST API with a `workflow` body field; snippets are stripped of upstream
