@@ -131,6 +131,30 @@ def make_mock_brave():
              "content": "sx &amp; snippet"},
         ])
 
+    @app.post("/kagi/search")
+    def kagi():
+        assert request.headers.get("Authorization") == "Bearer MOCK-KAGI-KEY"
+        body = request.get_json(force=True)
+        wf = body.get("workflow", "search")
+        q = body.get("query", "")
+        if wf == "news":
+            return jsonify(data={"news": [
+                {"url": "https://k.example/n1", "title": f"Kagi news for {q}",
+                 "time": "2026-10-10T09:00:00Z",
+                 "props": {"group_id": "k.example"}}]})
+        if wf == "images":
+            return jsonify(data={"image": [
+                {"url": "https://k.example/page1", "title": f"Kagi image {q}",
+                 "image": {"url": "https://k.example/full.jpg"},
+                 "props": {"thumbnail": {"url": "https://p.kagi.example/t1.jpg"}}}]})
+        return jsonify(data={"search": [
+            {"url": "https://k.example/1", "title": f"Kagi result for {q}",
+             "snippet": "stripped &amp; <strong>marked</strong> up",
+             "time": "2026-10-01T00:00:00Z", "props": {"group_id": "k.example"}},
+            {"url": "https://k.example/2", "title": "Second Kagi result",
+             "snippet": "two", "props": {"group_id": "k.example"}},
+        ]})
+
     @app.get("/searchapi/search")
     def searchapi():
         from urllib.parse import urlparse, parse_qs
@@ -292,6 +316,8 @@ def app_server(mock_brave, tmp_path_factory):
         "SERPAPI_SEARCH_URL": mock_brave.removesuffix("/res/v1") + "/serpapi/search.json",
         "SEARCHAPI_KEY": "MOCK-SEARCHAPI-KEY",
         "SEARCHAPI_SEARCH_URL": mock_brave.removesuffix("/res/v1") + "/searchapi/search",
+        "KAGI_KEY": "MOCK-KAGI-KEY",
+        "KAGI_SEARCH_URL": mock_brave.removesuffix("/res/v1") + "/kagi/search",
         "SEARXNG_URL": mock_brave.removesuffix("/res/v1") + "/searxng",
         "LOCAL_CHAT_BASE_URL": mock_brave.removesuffix("/res/v1") + "/v1",
         "EVUL_CONFIG_PATH": str(cfg),

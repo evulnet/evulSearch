@@ -116,7 +116,7 @@ let currentTab = "web";
 
 // --- Web engine picker (capability-driven: only engines configured on the
 // server AND supporting the current tab are offered) ---
-const ENGINE_LABELS = { brave: "Brave", duckduckgo: "DuckDuckGo", google: "Google", bing: "Bing" };
+const ENGINE_LABELS = { brave: "Brave", kagi: "Kagi", duckduckgo: "DuckDuckGo", google: "Google", bing: "Bing" };
 
 function enginesFor(tab) {
   return (serverCaps.engines || []).filter(e => (e.tabs || []).includes(tab));

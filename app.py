@@ -6,7 +6,9 @@ config.example.json for cache semantics (cache_hours: -1 off, 0 forever,
 """
 import html
 import json as jsonlib
+import datetime
 import os
+import re
 import sqlite3
 import time
 from urllib.parse import quote_plus, urlparse
@@ -22,7 +24,7 @@ CONFIG_PATH = os.environ.get("EVUL_CONFIG_PATH", os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "config.json"))
 
 # Provider registry (used by config cleaning, priority and quotas).
-PROVIDER_NAMES = {"brave", "serpapi", "searchapi", "brightdata", "searxng"}
+PROVIDER_NAMES = {"brave", "serpapi", "searchapi", "brightdata", "searxng", "kagi"}
 # Engines the UI knows about and the provider order used when config.json
 # does not override it via "engine_priority". An EMPTY list in config means
 # "engine disabled"; providers may also be reordered per engine.
@@ -31,6 +33,7 @@ PROVIDER_NAMES = {"brave", "serpapi", "searchapi", "brightdata", "searxng"}
 # Data (news+images) so Bing prefers SearchApi.
 ENGINE_DEFAULT_ORDER = {
     "brave": ["brave"],
+    "kagi": ["kagi"],
     "duckduckgo": ["searchapi"],
     "google": ["serpapi", "searchapi", "brightdata"],
     "bing": ["searchapi", "brightdata"],
@@ -243,6 +246,18 @@ SEARCHAPI_CAPS = {
     "duckduckgo": ["web", "images"],
 }
 
+# Kagi: paid indie search engine with its own index (no free tier; pay-per-
+# 1000-results on the API). POST-only endpoint; result type is chosen by the
+# `workflow` body field (spec: search|images|videos|news|podcasts), buckets
+# arrive as data.search / data.image / data.news (all live-verified 2026-10).
+# No Places support (Kagi has no local pack product). Snippets carry HTML
+# markup — must be stripped before display. Freshness rides the undocumented
+# but functional `tbs` operator; safe search via Teletype `!safe=` in the
+# query text.
+KAGI_KEY = os.environ.get("KAGI_KEY", "")
+KAGI_URL = os.environ.get("KAGI_SEARCH_URL", "https://kagi.com/api/v1/search")
+KAGI_CAPS = ["web", "news", "images"]
+
 def _provider_caps(prov, engine):
     if prov == "brave":
         return BRAVE_CAPS if engine == "brave" else None
@@ -254,6 +269,8 @@ def _provider_caps(prov, engine):
         return SEARCHAPI_CAPS.get(engine)
     if prov == "brightdata":
         return BD_CAPS.get(engine)
+    if prov == "kagi":
+        return list(KAGI_CAPS) if engine == "kagi" else None
     return None
 
 
@@ -262,7 +279,8 @@ def _provider_configured(prov):
             "serpapi": bool(SERPAPI_KEY),
             "searchapi": bool(SEARCHAPI_KEY),
             "brightdata": bool(BD_KEY and BD_ZONE),
-            "searxng": bool(SEARXNG_URL)}.get(prov, False)
+            "searxng": bool(SEARXNG_URL),
+            "kagi": bool(KAGI_KEY)}.get(prov, False)
 
 
 def engine_providers(engine):
@@ -291,7 +309,7 @@ def engines_available():
     a quota-exhausted provider falls through to the next one at request time.
     """
     e = []
-    for eng in ("brave", "duckduckgo", "google", "bing", "searxng"):
+    for eng in ("brave", "kagi", "duckduckgo", "google", "bing", "searxng"):
         tabs = []
         for _prov, caps in engine_providers(eng):
             tabs += [t for t in caps if t not in tabs]
@@ -301,6 +319,8 @@ def engines_available():
                 entry["label"] = "SearXNG"
             elif eng == "duckduckgo":
                 entry["label"] = "DuckDuckGo"
+            elif eng == "kagi":
+                entry["label"] = "Kagi"
             e.append(entry)
     return e
 PORT = int(os.environ.get("PORT", 5000))
@@ -786,6 +806,91 @@ def _searchapi_map(items, tab):
     return out
 
 
+def _strip_tags(s):
+    """Kagi snippets/titles carry HTML markup; strip then unescape."""
+    return html.unescape(re.sub(r"<[^>]*>", "", str(s)))
+
+
+def _rel_age(iso):
+    """ISO8601 ('2026-10-09T13:42:52Z') -> '3h ago' style; '' on junk."""
+    try:
+        dt = datetime.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        secs = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds()
+        if secs < 0:
+            return "just now"
+        if secs < 90:
+            return "just now"
+        if secs < 5400:
+            return f"{int(secs // 60)}m ago"
+        if secs < 129600:
+            return f"{int(secs // 3600)}h ago"
+        if secs < 2419200:
+            return f"{int(secs // 86400)}d ago"
+        if secs < 31536000:
+            return f"{int(secs // 604800)}w ago"
+        return f"{int(secs // 2592000)}mo ago"
+    except (ValueError, TypeError):
+        return ""
+
+
+def _kagi_search(query, tab, count, safesearch, freshness):
+    """Results via the Kagi Search API (POST + workflow selector)."""
+    body = {"query": query, "language": "en", "timeout": 10,
+            "workflow": {"web": "search", "news": "news",
+                         "images": "images"}[tab]}
+    if safesearch in ("strict", "moderate", "off"):
+        body["query"] += f" !safe={safesearch}"
+    if freshness in ("day", "week", "month", "year") and tab in ("web", "news"):
+        body["operators"] = [["tbs", {"day": "qdr:d", "week": "qdr:w",
+                                      "month": "qdr:m", "year": "qdr:y"}[freshness]]]
+    try:
+        resp = requests.post(KAGI_URL,
+                             headers={"Authorization": f"Bearer {KAGI_KEY}",
+                                      "Content-Type": "application/json"},
+                             json=body, timeout=30)
+    except requests.RequestException:
+        return None, "Could not reach Kagi."
+    try:
+        data = (resp.json().get("data") or {})
+    except ValueError:
+        data = {}
+    if resp.status_code != 200:
+        # Kagi error bodies quote the request; relay only the status.
+        return None, f"Kagi error (HTTP {resp.status_code})."
+    bucket = {"web": "search", "news": "news", "images": "image"}[tab]
+    return (data.get(bucket) or [])[:count], None
+
+
+def _kagi_map(items, tab):
+    """Kagi result dicts -> our normalized shapes (web/news/images)."""
+    out = []
+    for it in items:
+        title = _strip_tags(it.get("title") or "")
+        link = str(it.get("url") or "")
+        if not title or not link:
+            continue
+        props = it.get("props") or {}
+        if tab == "images":
+            img = it.get("image") or {}
+            origin = img.get("url") if isinstance(img, dict) else str(img)
+            thumb = (props.get("thumbnail") or {}).get("url") if isinstance(
+                props.get("thumbnail"), dict) else ""
+            if not origin:
+                continue
+            out.append({"title": title, "url": link,
+                        "source": urlparse(link).netloc,
+                        "thumb": thumb or origin, "origin": origin})
+            continue
+        src = props.get("group_id") or urlparse(link).netloc
+        out.append({
+            "title": title, "url": link,
+            "description": _strip_tags(it.get("snippet") or ""),
+            "age": _rel_age(it.get("time")),
+            "source": src,
+        })
+    return out
+
+
 def _searx_search(query, tab, count, safesearch, freshness):
     """Results from a self-hosted SearXNG (JSON API). (items, error)."""
     cats = {"web": "general", "news": "news", "images": "images"}[tab]
@@ -931,6 +1036,8 @@ def search():
             items, err = _serpapi_search(qparam, engine, tab, count, safesearch, freshness_raw)
         elif provider == "searchapi":
             items, err = _searchapi_search(qparam, engine, tab, count, safesearch, freshness_raw)
+        elif provider == "kagi":
+            items, err = _kagi_search(qparam, tab, count, safesearch, freshness_raw)
         elif provider == "searxng":
             items, err = _searx_search(qparam, tab, count, safesearch, freshness_raw)
         else:
@@ -941,6 +1048,8 @@ def search():
             results = _serpapi_map(items, tab)
         elif provider == "searchapi":
             results = _searchapi_map(items, tab)
+        elif provider == "kagi":
+            results = _kagi_map(items, tab)
         elif provider == "searxng":
             results = _searx_map(items, tab)
         elif tab == "places":

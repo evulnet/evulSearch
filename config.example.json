@@ -5,12 +5,14 @@
   "allow_map_embed": true,
   "engine_priority": {
     "brave": ["brave"],
+    "kagi": ["kagi"],
     "duckduckgo": ["searchapi"],
     "google": ["serpapi", "searchapi", "brightdata"],
     "bing": ["searchapi", "brightdata"],
     "searxng": ["searxng"]
   },
   "provider_quotas": {
-    "serpapi": {"per_day": 20, "per_month": 100}
+    "serpapi": {"per_day": 20, "per_month": 100},
+    "kagi": {"per_day": 50}
   }
 }

@@ -17,6 +17,13 @@ Format: latest first; sections `Added / Changed / Fixed`.
   answer and Places text — the page may wrap, but never scrolls sideways.
 
 ### Added
+- **Kagi provider** (`KAGI_KEY`): a Kagi engine pill backed by Kagi's own
+  premium index — Web, News and Images (no Places; Kagi has no local pack).
+  POST API with a `workflow` body field; snippets are stripped of upstream
+  HTML and ISO timestamps converted to relative ages server-side. Freshness
+  and safe-search supported (see README limits). **Pay-as-you-go with no
+  free tier — set `provider_quotas` for `kagi` when you enable it**; Kagi
+  slots in right after Brave in pill order.
 - **SearchApi.io provider** (`SEARCHAPI_KEY`): new **DuckDuckGo engine pill**
   (web + images — SearchApi's plan has no DDG news/maps engines), a second
   provider for Google, and **Bing upgrades to web/news/images**. SearchApi

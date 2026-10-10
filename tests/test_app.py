@@ -62,6 +62,8 @@ def _isolate_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(appmod, "SERPAPI_KEY", "")
     monkeypatch.setattr(appmod, "SEARCHAPI_KEY", "")
     monkeypatch.setattr(appmod, "SEARCHAPI_URL", "http://sa.test/api/v1/search")
+    monkeypatch.setattr(appmod, "KAGI_KEY", "")
+    monkeypatch.setattr(appmod, "KAGI_URL", "http://kagi.test/api/v1/search")
     monkeypatch.setattr(appmod, "SEARXNG_URL", "")
 
 
@@ -883,3 +885,92 @@ def test_config_lists_duckduckgo_engine(client, monkeypatch):
     assert engines["duckduckgo"]["tabs"] == ["web", "images"]
     assert engines["duckduckgo"]["label"] == "DuckDuckGo"
     assert engines["bing"]["tabs"] == ["web", "news", "images"]
+
+
+# --- Kagi provider (own engine pill; POST workflow API) ---
+
+def _kagi_env(monkeypatch):
+    monkeypatch.setattr(appmod, "KAGI_KEY", "kk")
+    monkeypatch.setattr(appmod, "KAGI_URL", "http://kagi.test/api/v1/search")
+    monkeypatch.setattr(appmod, "SERPAPI_KEY", "")
+    monkeypatch.setattr(appmod, "SEARCHAPI_KEY", "")
+    monkeypatch.setattr(appmod, "BD_KEY", "")
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+
+
+def test_kagi_web_strips_markup(client, monkeypatch):
+    _kagi_env(monkeypatch)
+    posts = {}
+    real_post = appmod.requests.post
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        posts["url"] = url; posts["headers"] = headers; posts["json"] = json
+        class R:
+            status_code = 200
+            def json(self):
+                return {"data": {"search": [
+                    {"url": "https://a.example/1", "title": "T &amp; B",
+                     "snippet": "clean <strong>baked</strong> text",
+                     "time": "2026-10-08T10:00:00Z", "props": {"group_id": "a.example"}}]}}
+        return R()
+    monkeypatch.setattr(appmod.requests, "post", fake_post)
+    body = client.get("/api/search?q=x&engine=kagi").get_json()
+    r0 = body["results"][0]
+    assert posts["url"] == "http://kagi.test/api/v1/search"
+    assert posts["headers"]["Authorization"] == "Bearer kk"
+    assert posts["json"]["workflow"] == "search"
+    assert "!safe=moderate" in posts["json"]["query"]
+    assert r0["title"] == "T & B"                    # entity-unescaped
+    assert r0["description"] == "clean baked text"   # tags stripped
+    assert r0["source"] == "a.example"
+    assert r0["age"].endswith("ago")                 # ISO -> relative
+    assert real_post
+
+
+def test_kagi_news_workflow_and_images(client, monkeypatch):
+    _kagi_env(monkeypatch)
+    seen = {}
+    def fake_post(url, headers=None, json=None, timeout=None):
+        seen.update(json)
+        class R:
+            status_code = 200
+            def json(self):
+                wf = json["workflow"]
+                data = {"news": [{"url": "https://n/1", "title": "News item",
+                                  "time": "2026-10-10T08:00:00Z",
+                                  "props": {"group_id": "n.example"}}]} \
+                    if wf == "news" else \
+                    {"image": [{"url": "https://p/1", "title": "Img",
+                                "image": {"url": "https://img/1.jpg"},
+                                "props": {"thumbnail": {"url": "https://t/1.jpg"}}}]}
+                return {"data": data}
+        return R()
+    monkeypatch.setattr(appmod.requests, "post", fake_post)
+    news = client.get("/api/search?q=x&engine=kagi&tab=news").get_json()["results"]
+    assert seen["workflow"] == "news"
+    assert news[0]["source"] == "n.example" and news[0]["age"].endswith("ago")
+    imgs = client.get("/api/search?q=x&engine=kagi&tab=images").get_json()["results"]
+    assert seen["workflow"] == "images"
+    assert imgs[0]["origin"] == "https://img/1.jpg"
+    assert imgs[0]["thumb"] == "https://t/1.jpg"
+
+
+def test_kagi_tab_guard_and_config(client, monkeypatch):
+    _kagi_env(monkeypatch)
+    assert client.get("/api/search?q=x&engine=kagi&tab=places").status_code == 400
+    engines = {e["id"]: e for e in client.get("/api/config").get_json()["engines"]}
+    assert engines["kagi"]["tabs"] == ["web", "news", "images"]
+    assert engines["kagi"]["label"] == "Kagi"
+
+
+def test_kagi_error_status_only(client, monkeypatch):
+    _kagi_env(monkeypatch)
+    def fake_post(url, headers=None, json=None, timeout=None):
+        class R:
+            status_code = 401
+            def json(self):
+                return {"error": {"message": "bad key sk-secretish for query X"}}
+        return R()
+    monkeypatch.setattr(appmod.requests, "post", fake_post)
+    body = client.get("/api/search?q=x&engine=kagi").get_json()
+    assert body["error"] == "Kagi error (HTTP 401)."   # body never relayed

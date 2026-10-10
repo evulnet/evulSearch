@@ -111,6 +111,22 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   parse only; lcl carries ~15MB-equivalent base64 place photos (no documented
   exclusion flag) -> ~60-90s scrapes, BD timeout 120s, mitigated by the query
   cache on repeats.
+- **Kagi provider (user addition 2026-10; first native-index option besides
+  Brave).** Env `KAGI_KEY` (user's chosen name), `KAGI_SEARCH_URL` overrides
+  for tests. POST-only JSON API; result type is the BODY FIELD `workflow`
+  (search|news|images) — the `tbm=`/`tab=` operator guesses are decoys that
+  silently return web results. Docs page is a JS shell; the real spec
+  downloads from /api/docs/_bundle/openapi.json. Auth `Bearer {key}` per spec
+  (`Bot` prefix also works but follow the spec). Buckets are singular
+  (`data.search|news|image`). Snippets carry HTML -> `_strip_tags`; times are
+  ISO -> `_rel_age` (unit-covered). Images: `image.url` full +
+  `props.thumbnail.url` proxy. Freshness: undocumented-but-live
+  `operators:[["tbs","qdr:x"]]` web/news only; safe via `!safe=` Teletype
+  token appended to the query. Caps = web/news/images (NO places; no local
+  pack product). PAY-AS-YOU-GO, no free tier — README says so; keep that
+  sentence true if the matrix changes. UI engine test includes the Kagi pill:
+  clicking pills persists in the context, so the news-step restores Google
+  before the Places step.
 - **SearchApi.io provider (`SEARCHAPI_KEY` — NOT `DUCKDUCKGO_KEY`, user
   corrected the naming twice: it is a commercial SERP vendor, zero-retention
   is enterprise-only, do NOT brand it privacy-forward; there is no official

@@ -485,8 +485,8 @@ def test_engine_switch(browser, app_server):
     page.on("pageerror", lambda e: errors.append(e))
     page.goto(app_server + "/")
     expect(page.locator("#engines")).to_be_visible()
-    # brave, duckduckgo, google, bing, searxng
-    expect(page.locator("#engines button")).to_have_count(5)
+    # brave, kagi, duckduckgo, google, bing, searxng
+    expect(page.locator("#engines button")).to_have_count(6)
 
     # Google pill is served by SerpApi (best-first provider order)
     page.click('#engines button[data-engine="google"]')
@@ -497,7 +497,11 @@ def test_engine_switch(browser, app_server):
 
     # News: DuckDuckGo drops out (SearchApi plan has no DDG news engine)
     page.click('#tabs button[data-tab="news"]')
-    expect(page.locator("#engines button")).to_have_count(4)
+    expect(page.locator("#engines button")).to_have_count(5)
+    page.click('#engines button[data-engine="kagi"]')
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_contain_text("Kagi news for hello")
+    page.click('#engines button[data-engine="google"]')  # restore for later steps
     page.press("#q", "Enter")
     expect(page.locator("#results li").first).to_contain_text("SerpApi news for hello")
 
@@ -509,9 +513,9 @@ def test_engine_switch(browser, app_server):
     expect(page.locator("#map")).to_be_visible()
     assert page.evaluate("window.__fakeL.markers") >= 1
 
-    # Images: every engine serves images now (bing news/images via SearchApi)
+    # Images: every engine serves images now (bing via SearchApi, kagi native)
     page.click('#tabs button[data-tab="images"]')
-    expect(page.locator("#engines button")).to_have_count(5)
+    expect(page.locator("#engines button")).to_have_count(6)
 
     # DuckDuckGo pill (SearchApi-served): web + images only
     page.click('#tabs button[data-tab="web"]')

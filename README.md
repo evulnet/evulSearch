@@ -23,6 +23,7 @@ means touching none of the others.
 | Engine | Providers (best-first) | Web | News | Images | Places | Answers |
 |---|---|---|---|---|---|---|
 | Brave | Brave Search API (native) | ✅ | ✅ | ✅ | ✅ | ✅ (own key) |
+| Kagi | Kagi API (native, pay-as-you-go) | ✅ | ✅ | ✅ | – | – |
 | DuckDuckGo | SearchApi | ✅ | – | ✅ | – | – |
 | Google | SerpApi, SearchApi, Bright Data | ✅ | ✅ | ✅ | ✅† | – |
 | Bing | SearchApi, Bright Data | ✅ | ✅ | ✅ | – | – |
@@ -47,11 +48,14 @@ deployment assume your queries reach a third party. The guarantees evulSearch
 itself makes — no keys in the browser, no logs, your server as the only
 entry point — are unaffected either way.
 
-Everything above has a free tier (as of October 2026): Brave has a free monthly
-quota, SearchApi ~100 searches/month, SerpApi ~100/month, Bright Data ships free
-credits, and SearXNG is self-hosted so free forever. SearchApi's light quota is
-exactly what `provider_quotas` exists to manage. Check pricing pages for current
-numbers; nothing here is sponsored.
+Everything except Kagi has a free tier (as of October 2026): Brave has a free
+monthly quota, SearchApi ~100 searches/month, SerpApi ~100/month, Bright Data
+ships free credits, and SearXNG is self-hosted so free forever. **Kagi's API is
+pay-as-you-go with no free tier** — it's the "buy the premium index" option,
+billed per request through Kagi's own dashboard; set a `provider_quotas`
+budget the moment you enable it. SearchApi's light free quota is exactly what
+`provider_quotas` exists to manage. Check pricing pages for current numbers;
+nothing here is sponsored.
 
 ## Features
 
@@ -152,8 +156,8 @@ chooses richer vs cheaper knowingly, per engine:
 }
 ```
 
-Valid provider names: `brave`, `serpapi`, `searchapi`, `brightdata`,
-`searxng`.
+Valid provider names: `brave`, `kagi`, `serpapi`, `searchapi`,
+`brightdata`, `searxng`.
 
 **`engine_priority`** — provider order per engine:
 - The first provider that supports the tab **and is under its quota** answers.
@@ -164,7 +168,9 @@ Valid provider names: `brave`, `serpapi`, `searchapi`, `brightdata`,
   UI and direct API calls return 503.
 - Unset engines keep the built-in order: Google = SerpApi, SearchApi, Bright
   Data (SerpApi first because its Places carry website/phone/opening hours);
-  Bing = SearchApi, Bright Data (SearchApi also serves Bing news/images).
+  Bing = SearchApi, Bright Data (SearchApi also serves Bing news/images);
+  Kagi and DuckDuckGo each have a single provider, so their order matters
+  only as an on/off switch.
 - Unknown provider names are dropped.
 
 **`provider_quotas`** — call budgets per provider (all providers, Brave
@@ -224,6 +230,7 @@ cp .env.example .env        # then edit .env
 | `BRIGHTDATA_SERP_API_KEY` | no | Google (Web/News/Images/Places) + Bing (Web) engines via Bright Data SERP |
 | `BRIGHTDATA_SERP_ZONE` | with BD key | Your Bright Data zone name (required by the API) |
 | `SERPAPI_KEY` | no | SerpApi provider for the Google pill (web/news/images/**places-with-map-pins**); first priority for Google |
+| `KAGI_KEY` | no | Kagi Search API (the Kagi pill: web/news/images; its own index). Pay-as-you-go, no free tier — pair with `provider_quotas` |
 | `SEARCHAPI_KEY` | no | SearchApi.io provider: the DuckDuckGo engine (web/images) plus Google (all tabs) and Bing (web/news/images). Free tier ~100/mo — pair with `provider_quotas` |
 | `SEARXNG_URL` | no | Base URL of a self-hosted SearXNG (web/news/images); its settings.yml must allow `formats: [json]` |
 | `LOCAL_CHAT_BASE_URL` | no | OpenAI-compliant answers server, e.g. `http://127.0.0.1:8000/v1` (enables the “Local” answers pill) |
@@ -268,7 +275,7 @@ or search API is ever contacted from the test suite.
   neighbor). Only do this on a network you control. Prefer `https://` or a
   tunnel for anything beyond the LAN. When `LOCAL_CHAT_API_KEY` is set, that
   token also travels in a Bearer header and would be sniffable over HTTP.
-- **Your queries go to whichever vendors you configure.** Brave, SerpApi,
+- **Your queries go to whichever vendors you configure.** Brave, Kagi, SerpApi,
   SearchApi and Bright Data each see the query text and your server's address;
   none of them are "private by contract" on hobby tiers (SearchApi's
   zero-retention offer is enterprise-tier only). SERP vendors exist to sell
@@ -299,6 +306,16 @@ or search API is ever contacted from the test suite.
   subset (no HTML injection), and outbound links use `rel="noopener noreferrer"`.
 
 ## Known API limits (verified live)
+
+Kagi:
+- No Places tab (Kagi has no local-pack product). The pill shows Web/News/
+  Images only.
+- News results are Kagi's editorial news bucket: occasionally a reference
+  page slips in without a timestamp — that's upstream, not a parse failure.
+- Snippets arrive with HTML markup and ISO timestamps; the proxy strips tags
+  and converts times to relative ages before the browser ever sees them.
+- Freshness uses the (undocumented but functional) `tbs` operator; safe
+  search uses the `!safe=` Teletype token in the query text.
 
 Brave:
 - ≤ 20 results per query; real pagination is not offered (`offset` capped).
