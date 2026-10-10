@@ -21,6 +21,49 @@ load_dotenv()
 CONFIG_PATH = os.environ.get("EVUL_CONFIG_PATH", os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "config.json"))
 
+# Provider registry (used by config cleaning, priority and quotas).
+PROVIDER_NAMES = {"brave", "serpapi", "brightdata", "searxng"}
+# Engines the UI knows about and the provider order used when config.json
+# does not override it via "engine_priority". An EMPTY list in config means
+# "engine disabled"; providers may also be reordered per engine.
+ENGINE_DEFAULT_ORDER = {
+    "brave": ["brave"],
+    "google": ["serpapi", "brightdata"],
+    "bing": ["brightdata"],
+    "searxng": ["searxng"],
+}
+
+
+def _clean_priority(v):
+    out = {}
+    if isinstance(v, dict):
+        for eng, lst in v.items():
+            if eng in ENGINE_DEFAULT_ORDER and isinstance(lst, list):
+                allowed = ENGINE_DEFAULT_ORDER[eng]
+                # keep admin's order; drop unknown providers, ignore anything
+                # that could never serve this engine
+                out[eng] = [p for p in lst if isinstance(p, str) and p in allowed]
+    return out
+
+
+def _clean_quotas(v):
+    out = {}
+    if isinstance(v, dict):
+        for p, q in v.items():
+            if p not in PROVIDER_NAMES or not isinstance(q, dict):
+                continue
+            cleaned = {}
+            for key in ("per_day", "per_month"):
+                try:
+                    n = int(q.get(key))
+                except (TypeError, ValueError):
+                    continue
+                if n > 0:
+                    cleaned[key] = n
+            if cleaned:
+                out[p] = cleaned
+    return out
+
 
 def _place_img(r):
     """First picture (Brave CDN), falling back to the thumbnail.
@@ -81,6 +124,10 @@ def load_config():
         # Third-party map tiles: served by default (double opt-OUT: set
         # allow_map_embed=false on the server AND/OR uncheck the user cog).
         "allow_map_embed": bool(cfg.get("allow_map_embed", True)),
+        # Admin levers: per-engine provider priority (cost vs richness) and
+        # per-provider call quotas (UTC day/month, counted in the SQLite db).
+        "engine_priority": _clean_priority(cfg.get("engine_priority")),
+        "provider_quotas": _clean_quotas(cfg.get("provider_quotas")),
     }
 
 
@@ -178,31 +225,61 @@ SERPAPI_CAPS = {"google": ["web", "news", "images", "places"]}
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "").rstrip("/")
 SEARX_CAPS = ["web", "news", "images"]
 
-def engines_available():
-    e = []
-    if API_KEY:
-        e.append({"id": "brave", "tabs": BRAVE_CAPS})
-    # Engine ids (google/bing) can be served by more than one provider;
-    # the UI sees ONE engine per id with the union of provider capabilities.
-    for eng in BD_ENGINES:
-        tabs = []
-        for prov, caps in engine_providers(eng):
-            tabs += [t for t in caps if t not in tabs]
-        if tabs:
-            e.append({"id": eng, "tabs": tabs})
-    if SEARXNG_URL:
-        e.append({"id": "searxng", "tabs": list(SEARX_CAPS), "label": "SearXNG"})
-    return e
+def _provider_caps(prov, engine):
+    if prov == "brave":
+        return BRAVE_CAPS if engine == "brave" else None
+    if prov == "searxng":
+        return list(SEARX_CAPS) if engine == "searxng" else None
+    if prov == "serpapi":
+        return SERPAPI_CAPS.get(engine)
+    if prov == "brightdata":
+        return BD_CAPS.get(engine)
+    return None
+
+
+def _provider_configured(prov):
+    return {"brave": bool(API_KEY),
+            "serpapi": bool(SERPAPI_KEY),
+            "brightdata": bool(BD_KEY and BD_ZONE),
+            "searxng": bool(SEARXNG_URL)}.get(prov, False)
 
 
 def engine_providers(engine):
-    """Configured providers for an engine id, best-first."""
-    p = []
-    if SERPAPI_KEY and engine in SERPAPI_CAPS:
-        p.append(("serpapi", SERPAPI_CAPS[engine]))
-    if BD_KEY and BD_ZONE and engine in BD_CAPS:
-        p.append(("brightdata", BD_CAPS[engine]))
-    return p
+    """Configured, enabled providers for an engine id, best-first.
+
+    Order comes from config.json `engine_priority[engine]` when present (an
+    empty list disables the engine entirely), else ENGINE_DEFAULT_ORDER.
+    Providers the admin left out of a non-empty list are treated as disabled
+    for that engine - that is how you keep a metered API off the hot path.
+    """
+    default = ENGINE_DEFAULT_ORDER.get(engine, [])
+    prio = CONFIG.get("engine_priority") or {}
+    order = prio[engine] if engine in prio else default
+    out = []
+    for prov in order:
+        caps = _provider_caps(prov, engine)
+        if caps and _provider_configured(prov):
+            out.append((prov, caps))
+    return out
+
+
+def engines_available():
+    """Engines the UI may offer: id -> union of enabled provider tabs.
+
+    Quotas are deliberately NOT consulted here (they reset on their own);
+    a quota-exhausted provider falls through to the next one at request time.
+    """
+    e = []
+    for eng in ("brave",) + BD_ENGINES + ("searxng",):
+        tabs = []
+        for _prov, caps in engine_providers(eng):
+            tabs += [t for t in caps if t not in tabs]
+        if tabs:
+            entry = {"id": eng, "tabs": tabs}
+            if eng == "searxng":
+                entry["label"] = "SearXNG"
+            e.append(entry)
+    return e
 PORT = int(os.environ.get("PORT", 5000))
 HOST = os.environ.get("HOST", "127.0.0.1")
 
@@ -269,6 +346,64 @@ def cache_set(key, payload, hours):
 
 def cache_key(prefix, parts):
     return prefix + "|" + "|".join(str(p) for p in parts)
+
+
+# --- Provider usage counters (for quotas; counts only, never query text) ---
+def _usage_db():
+    conn = sqlite3.connect(CONFIG["cache_db"])
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS provider_usage (provider TEXT NOT NULL,"
+        " ymd TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0,"
+        " PRIMARY KEY (provider, ymd))")
+    return conn
+
+
+def quota_blocked_reason(prov):
+    """None if the provider may be called now, else a short human reason."""
+    quota = (CONFIG.get("provider_quotas") or {}).get(prov)
+    if not quota:
+        return None
+    today = time.strftime("%Y-%m-%d", time.gmtime())  # UTC resets
+    month = today[:7]
+    try:
+        conn = _usage_db()
+    except sqlite3.Error:
+        return None  # never block traffic because bookkeeping failed
+    try:
+        day = conn.execute(
+            "SELECT calls FROM provider_usage WHERE provider=? AND ymd=?",
+            (prov, today)).fetchone()
+        day_used = day[0] if day else 0
+        if quota.get("per_day") and day_used >= quota["per_day"]:
+            return "daily quota reached"
+        if quota.get("per_month"):
+            row = conn.execute(
+                "SELECT COALESCE(SUM(calls),0) FROM provider_usage"
+                " WHERE provider=? AND ymd LIKE ?",
+                (prov, month + "%")).fetchone()
+            if row[0] >= quota["per_month"]:
+                return "monthly quota reached"
+    except sqlite3.Error:
+        pass
+    finally:
+        conn.close()
+    return None
+
+
+def usage_bump(prov):
+    if not (CONFIG.get("provider_quotas") or {}).get(prov):
+        return  # no quota configured -> no bookkeeping cost
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    try:
+        conn = _usage_db()
+        conn.execute(
+            "INSERT INTO provider_usage (provider, ymd, calls) VALUES (?, ?, 1)"
+            " ON CONFLICT(provider, ymd) DO UPDATE SET calls = calls + 1",
+            (prov, today))
+        conn.commit()
+        conn.close()
+    except sqlite3.Error:
+        pass
 
 
 def _brightdata_serp(query, engine, tab, count, safesearch, freshness):
@@ -410,12 +545,18 @@ def _bd_map(items, tab):
 
 def _serpapi_search(query, engine, tab, count, safesearch, freshness):
     """Results via SerpApi. Returns (items, error); one is non-None."""
-    serp_engine = {"web": f"{engine}", "news": "google_news" if engine == "google" else f"{engine}_news",
-                   "images": "google_images", "places": "google_locations"}[tab]
-    if engine == "bing" and tab != "web":
-        return None, "SerpApi Bing supports the Web tab only."
-    params = {"engine": serp_engine, "q": query, "api_key": SERPAPI_KEY,
+    if engine != "google":
+        return None, "SerpApi provider supports Google only."
+    params = {"engine": "google", "q": query, "api_key": SERPAPI_KEY,
               "hl": "en", "gl": "us", "num": min(count, 20)}
+    if tab == "news":
+        params["engine"] = "google_news"
+    elif tab == "images":
+        params["engine"] = "google_images"
+    elif tab == "places":
+        # Places ride on a normal google search (verified live 2026-10);
+        # the separate google_locations product is not on this plan.
+        params["fetch_place_results"] = "true"
     if safesearch == "strict":
         params["safe"] = "active"
     elif safesearch == "off":
@@ -434,11 +575,16 @@ def _serpapi_search(query, engine, tab, count, safesearch, freshness):
     if resp.status_code != 200:
         # SerpApi error bodies can quote the request; relay only the status.
         return None, f"SerpApi error (HTTP {resp.status_code})."
-    key = {"web": "organic_results", "news": "news_results",
-           "images": "inline_images", "places": "places"}[tab]
-    items = data.get(key) or []
-    if tab == "news" and not items:  # google_news also uses organic_results
-        items = data.get("organic_results") or []
+    if tab == "places":
+        lr = data.get("local_results") or {}
+        items = lr.get("places") if isinstance(lr, dict) else lr
+        items = items or []
+    else:
+        key = {"web": "organic_results", "news": "news_results",
+               "images": "images_results"}[tab]  # verified live 2026-10
+        items = data.get(key) or []
+        if tab == "news" and not items:  # google_news also uses organic_results
+            items = data.get("organic_results") or []
     return items[:count], None
 
 
@@ -447,30 +593,31 @@ def _serpapi_map(items, tab):
     out = []
     for it in items:
         if tab == "places":
-            name = html.unescape(it.get("title") or "")
+            name = html.unescape(str(it.get("title") or ""))
             if not name:
                 continue
-            info = it.get("location_info") or {}
-            coords = info.get("coordinates") or {}
-            lat, lon = coords.get("latitude"), coords.get("longitude")
+            gps = it.get("gps_coordinates") or {}
+            lat, lon = gps.get("latitude"), gps.get("longitude")
+            links = it.get("links") or {}
             bits = []
             if it.get("rating"):
                 bits.append(f"{it['rating']}\u2605")
             if it.get("reviews"):
                 bits.append(f"{it['reviews']} reviews")
-            hours = it.get("opening_hours") or {}
-            if isinstance(hours, dict) and hours.get("today"):
-                bits.append(str(hours["today"]))
+            if it.get("hours"):
+                bits.append(str(it["hours"]))
             out.append({
                 "title": name,
-                "url": it.get("website") or "",
-                "address": html.unescape(it.get("address") or ""),
-                "phone": it.get("phone") or "",
+                "url": links.get("website") or "",
+                "address": html.unescape(str(it.get("address") or "")),
+                "phone": str(it.get("phone") or ""),
                 "coordinates": [lat, lon] if lat is not None and lon is not None else [],
-                "categories": html.unescape(it.get("type") or ""),
+                "categories": html.unescape(str(it.get("type") or "")),
                 "opening": " \u00b7 ".join(bits),
                 "description": "",
-                "img": it.get("thumbnail") or "",
+                # SerpApi's own `thumbnail` is a short-lived cached URL; the
+                # googleusercontent `thumbnail_large` is hotlinkable.
+                "img": it.get("thumbnail_large") or "",
             })
             continue
         link = it.get("link") or it.get("url") or ""
@@ -488,12 +635,12 @@ def _serpapi_map(items, tab):
             "source": src or urlparse(link).netloc,
         }
         if tab == "images":
-            # SerpApi's inline_images carry the full-res URL in `thumbnail`
-            # (their docs' quirk); verify live and adjust if shapes change.
-            origin = (it.get("thumbnail_large") or it.get("original")
+            # google_images shape (verified live 2026-10): `original` is the
+            # direct image URL, `thumbnail` a gstatic proxy URL.
+            origin = (it.get("original") or it.get("thumbnail_large")
                       or it.get("thumbnail") or link)
             row = {
-                "title": html.unescape(it.get("title") or it.get("title_source") or ""),
+                "title": html.unescape(it.get("title") or ""),
                 "url": link, "source": row["source"],
                 "thumb": it.get("thumbnail") or origin,
                 "origin": origin,
@@ -563,14 +710,11 @@ def index():
 
 @app.get("/api/search")
 def search():
-    if not API_KEY and not (BD_KEY and BD_ZONE):
-        return jsonify(error="Server is missing BRAVE_API_KEY (and Bright Data keys)."), 500
-
     engine = request.args.get("engine", "brave")
     if engine not in ("brave", "searxng") + BD_ENGINES:
         engine = "brave"
-    if engine == "brave" and not API_KEY:
-        return jsonify(error="Server is missing BRAVE_API_KEY."), 500
+    # Per-engine availability (missing key OR disabled via engine_priority)
+    # is decided in one place below, together with quota fall-through.
 
     query = (request.args.get("q") or "").strip()
     if not query:
@@ -621,26 +765,23 @@ def search():
 
     freshness_raw = request.args.get("freshness", "")
 
-    # Resolve the concrete provider for (engine, tab) before cache lookup so
-    # the cache key can carry it (same engine, different provider = different
-    # data shape; never mix them in one entry).
-    if engine == "brave":
-        provider = "brave"
-    elif engine == "searxng":
-        if not SEARXNG_URL:
-            return jsonify(error="SearXNG is not configured on this server."), 503
-        if tab not in SEARX_CAPS:
-            return jsonify(error="SearXNG does not support the "
-                                 f"{tab.capitalize()} tab."), 400
-        provider = "searxng"
-    else:
-        provs = engine_providers(engine)
-        if not provs:
-            return jsonify(error=f"{engine.capitalize()} is not configured on this server."), 503
-        provider = next((p for p, caps in provs if tab in caps), None)
-        if provider is None:
-            return jsonify(error=f"{engine.capitalize()} via the configured providers "
-                                 f"does not support the {tab.capitalize()} tab."), 400
+    # Resolve the provider that will actually serve this request:
+    # admin priority order, first one that (a) supports the tab and
+    # (b) is under its quota. Quota-exhausted providers fall through, so a
+    # metered API degrades to the unmetered one instead of failing.
+    provs = engine_providers(engine)
+    if not provs:
+        return jsonify(error=f"{engine.capitalize()} is not configured on this server"
+                             " (or disabled via engine_priority)."), 503
+    covering = [p for p, caps in provs if tab in caps]
+    if not covering:
+        return jsonify(error=f"{engine.capitalize()} does not support the "
+                             f"{tab.capitalize()} tab on this server."), 400
+    provider = next((p for p in covering if quota_blocked_reason(p) is None), None)
+    if provider is None:
+        reasons = ", ".join(f"{p} ({quota_blocked_reason(p)})" for p in covering)
+        return jsonify(error=f"Search providers exhausted: {reasons}."), 429
+    usage_bump(provider)
 
     ckey = cache_key("search", sorted(params.items())
                      + [("engine", engine), ("provider", provider)])

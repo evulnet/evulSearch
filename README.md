@@ -80,10 +80,16 @@ check current pricing at each vendor.
   viewport with edge-mounted arrows. Phones keep the single-column layout.
 - **Pluggable search engines** — see [Engines](#engines) above. Engine choice
   is per-user (localStorage), deep-linkable (`&engine=`), and gracefully
-  falls back when an engine can't serve the current tab. Google Images grids
-  hotlink originals (no thumbnail URLs in the SERP payload); Google Places
-  link out via Google Maps. First Google Images/Places hits are slow
+  falls back when an engine can't serve the current tab. The embedded map
+  works for **any engine whose Places results carry coordinates** (Brave and
+  SerpApi do; Bright Data's scrape doesn't — its Places link out to Google
+  Maps instead). First Bright Data Google Images/Places hits are slow
   (~30–90 s live scrape); the query cache makes repeats instant.
+- **Admin provider levers** — when one engine has several providers (Google =
+  SerpApi and/or Bright Data), `engine_priority` sets the order and can
+  disable either; `provider_quotas` gives metered APIs a call budget with
+  automatic fall-through to the unmetered provider. See
+  [Provider levers](#provider-levers-priority--quotas).
 - Server capabilities drive the UI: with no answers key the Answers tab and its
   settings hide themselves; without `allow_map_embed` the embedded-map option is
   hidden too (not just greyed out).
@@ -101,10 +107,65 @@ Copy `config.example.json` to `config.json` (gitignored) to change behavior:
 | `cache_hours` | `168` | Cache lifetime in hours for web/images/places/answers. `-1` disables that cache entirely, `0` keeps entries forever, positive numbers expire after that many hours. Negative values other than `-1` are treated as `-1`. |
 | `cache_hours_news` | `-1` | Same semantics, but applies to news searches separately (news changes fast, so off by default). |
 | `allow_map_embed` | `true` | Server half of the embedded-map switch (opt-OUT model: default on). Set `false` to disable map embedding for everyone — the cog option disappears and no third-party map assets are ever loaded (Leaflet from unpkg, tiles from OpenStreetMap, which see the mapped area + the visitor’s IP). Users can also opt out individually via the cog. |
-| `cache_db` | `evulsearch.db` | Path of the SQLite cache file (relative to `app.py` unless absolute) |
+| `cache_db` | `evulsearch.db` | Path of the SQLite cache file (relative to `app.py` unless absolute). Also holds the `provider_usage` quota counters when quotas are configured (counts only — never query text) |
+| `engine_priority` | built-in order | Provider order per engine; omit a provider to disable it for that engine, use `[]` to disable the engine. See [Provider levers](#provider-levers-priority--quotas) |
+| `provider_quotas` | off | Call budgets per provider, e.g. `{"serpapi": {"per_day": 20, "per_month": 100}}`. UTC resets; exhausted providers fall through to the next provider. See [Provider levers](#provider-levers-priority--quotas) |
 
 If `config.json` is missing or invalid, defaults apply. Restart the server
 after editing.
+
+### Provider levers: priority & quotas
+
+One engine pill (say “Google”) can be served by several upstream providers.
+Two config levers decide **which one answers** and **how often** — so the
+admin chooses richer vs cheaper *knowingly*, per engine:
+
+```json
+{
+  "engine_priority": {
+    "google": ["brightdata", "serpapi"],
+    "bing": ["brightdata"],
+    "brave": ["brave"],
+    "searxng": []
+  },
+  "provider_quotas": {
+    "serpapi": {"per_day": 20, "per_month": 100}
+  }
+}
+```
+
+**`engine_priority`** — provider order per engine (valid provider names:
+`brave`, `serpapi`, `brightdata`, `searxng`):
+- The first provider that supports the tab **and is under its quota** answers.
+- Providers omitted from a non-empty list are **disabled for that engine**.
+  The example puts Bright Data first for Google: SerpApi is the overflow,
+  not the default. The built-in order is SerpApi first (richer Places: map
+  coordinates, phone, opening hours).
+- An **empty list disables the engine entirely**: the pill disappears from
+  the UI and direct API calls get 503.
+- Unknown provider names are dropped; engines you don't list keep the
+  built-in order.
+
+**`provider_quotas`** — per-provider call budgets (all providers, Brave
+included):
+- `per_day` and/or `per_month`, reset on **UTC** day/month boundaries.
+  Counts persist in the `provider_usage` table of `cache_db` — counts only,
+  never query text.
+- On exhaustion the request **falls through to the next provider that can
+  serve the tab**; a metered API degrades instead of failing. If every
+  covering provider is capped out, the search returns a 429 naming the
+  quotas hit.
+- **Cache hits never count against quota.** Pairing a long `cache_hours`
+  with a small metered budget is a deliberate strategy: repeats are free,
+  each distinct query spends the meter once.
+- Enabling quotas creates the SQLite file for counters even when
+  `cache_hours: -1` turned the query cache off.
+
+Strategies that combine well: *hoard a small SerpApi plan* —
+`"provider_quotas": {"serpapi": {"per_day": 5}}` buys 5 map-pinned Google
+Places searches a day and sends everything else to Bright Data; *free-first*
+— leave quotas off and order `brave`/`searxng` ahead of paid providers on
+the Web tab.
 
 ## How it works
 

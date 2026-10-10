@@ -17,6 +17,20 @@ Format: latest first; sections `Added / Changed / Fixed`.
   answer and Places text — the page may wrap, but never scrolls sideways.
 
 ### Added
+- **Admin provider levers** in `config.json`: `engine_priority` (per-engine
+  provider order; omitted provider disabled, `[]` disables the engine) and
+  `provider_quotas` (`per_day`/`per_month`, UTC resets, counted in SQLite
+  `provider_usage` — counts only, never query text). Quota-exhausted
+  providers fall through to the next provider that can serve the tab, so a
+  metered API degrades to the cheap one instead of failing; only an
+  all-capped engine returns 429. Cache hits never count against quota.
+  Missing BRAVE key is now a per-engine 503, not a global 500 — brave-less
+  servers (BrightData/SerpApi/SearXNG only) are first-class.
+- SerpApi and SearXNG **live-verified** against real services: SerpApi web/
+  images/places (places via `fetch_place_results` -> `local_results.places`
+  with GPS coordinates — map pins work for the Google pill), SearXNG
+  web/news/images on a LAN instance. Fixed mappers to verified shapes
+  (`images_results`, `thumbnail_large` for hotlinkable thumbs).
 - Provider registry under engine ids: Google/Bing pills can be served by a
   priority list of providers — SerpApi (`SERPAPI_KEY`; web/news/images/places,
   Places carries coordinates so the embedded map works like Brave) first,

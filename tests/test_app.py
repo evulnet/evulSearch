@@ -52,11 +52,15 @@ def patch_get(monkeypatch, resp):
 
 @pytest.fixture(autouse=True)
 def _isolate_cache(tmp_path, monkeypatch):
-    """Default: cache disabled + temp db, so tests never share state."""
+    """Default: cache disabled + temp db, so tests never share state.
+    Provider keys pinned off hermetically: the developer's .env must not
+    reorder providers (dotenv loads it into os.environ on import)."""
     monkeypatch.setattr(appmod, "CONFIG", {
         "cache_hours": -1, "cache_hours_news": -1,
         "cache_db": str(tmp_path / "cache.db"),
     })
+    monkeypatch.setattr(appmod, "SERPAPI_KEY", "")
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
 
 
 def _enable_cache(tmp_path, monkeypatch, hours, news_hours=-1):
@@ -436,7 +440,7 @@ def test_brave_network_failure(client, monkeypatch):
 
 def test_missing_api_key(client, monkeypatch):
     monkeypatch.setattr(appmod, "API_KEY", "")
-    assert client.get("/api/search?q=x").status_code == 500
+    assert client.get("/api/search?q=x").status_code == 503
 
 
 def patch_post(monkeypatch, resp):
@@ -665,15 +669,18 @@ def test_serpapi_places_coordinates_enable_map(client, monkeypatch):
     _serp_env(monkeypatch)
     monkeypatch.setattr(appmod, "SEARXNG_URL", "")
     _patch_post(monkeypatch, {"organic": []})
-    patch_get(monkeypatch, FakeResp(payload={"places": [
-        {"title": "Osaka sushi", "address": "1 street", "website": "https://w.example",
+    patch_get(monkeypatch, FakeResp(payload={"local_results": {"places": [
+        {"title": "Osaka sushi", "address": "1 street",
+         "links": {"website": "https://w.example"},
          "phone": "123", "rating": 4.4, "type": "sushi",
-         "location_info": {"coordinates": {"latitude": 34.7, "longitude": 135.5}}},
-    ]}))
+         "thumbnail_large": "https://img.example/1.jpg",
+         "gps_coordinates": {"latitude": 34.7, "longitude": 135.5}},
+    ]}}))
     body = client.get("/api/search?q=sushi&engine=google&tab=places").get_json()
     r0 = body["results"][0]
     assert r0["coordinates"] == [34.7, 135.5]  # map pins work like Brave
     assert r0["url"] == "https://w.example"
+    assert r0["img"] == "https://img.example/1.jpg"
 
 
 def test_searxng_mapping_and_guards(client, monkeypatch):
@@ -719,3 +726,76 @@ def test_config_engines_union_and_searxng(client, monkeypatch):
     # one Google pill for BOTH providers, tabs = union
     assert by_id["google"]["tabs"] == ["web", "news", "images", "places"]
     assert by_id["searxng"]["tabs"] == ["web", "news", "images"]
+
+
+# --- admin levers: engine_priority + provider_quotas ---
+
+def _both_google_providers(monkeypatch):
+    monkeypatch.setattr(appmod, "SERPAPI_KEY", "sk")
+    monkeypatch.setattr(appmod, "SERPAPI_URL", "http://sp.test/search.json")
+    monkeypatch.setattr(appmod, "BD_KEY", "bk")
+    monkeypatch.setattr(appmod, "BD_ZONE", "bz")
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+
+
+def test_priority_config_reverses_provider(client, monkeypatch):
+    _both_google_providers(monkeypatch)
+    monkeypatch.setitem(appmod.CONFIG, "engine_priority",
+                        {"google": ["brightdata", "serpapi"]})
+    gets = patch_get(monkeypatch, FakeResp(payload={"organic_results": []}))
+    posts = _patch_post(monkeypatch, {"organic": []})
+    client.get("/api/search?q=x&engine=google")
+    assert "url" in posts and "url" not in gets  # BrightData first now
+
+
+def test_priority_config_disables_engine(client, monkeypatch):
+    _both_google_providers(monkeypatch)
+    monkeypatch.setattr(appmod, "BD_KEY", "")  # only serpapi configured
+    monkeypatch.setitem(appmod.CONFIG, "engine_priority", {"google": []})
+    ids = {e["id"] for e in client.get("/api/config").get_json()["engines"]}
+    assert "google" not in ids
+    assert client.get("/api/search?q=x&engine=google").status_code == 503
+
+
+def test_quota_falls_back_to_cheap_provider(client, monkeypatch, tmp_path):
+    _both_google_providers(monkeypatch)
+    monkeypatch.setitem(appmod.CONFIG, "cache_db", str(tmp_path / "usage.db"))
+    monkeypatch.setitem(appmod.CONFIG, "provider_quotas",
+                        {"serpapi": {"per_day": 1}})
+    posts = _patch_post(monkeypatch, {"organic": []})
+    gets = patch_get(monkeypatch, FakeResp(payload={"organic_results": []}))
+    r1 = client.get("/api/search?q=a&engine=google")  # serpapi (1/day budget)
+    r2 = client.get("/api/search?q=b&engine=google")  # quota hit -> BrightData
+    assert r1.status_code == r2.status_code == 200
+    assert "url" in gets and "url" in posts  # both providers used, in order
+
+
+def test_quota_exhausted_single_provider_429(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "SERPAPI_KEY", "sk")
+    monkeypatch.setattr(appmod, "SERPAPI_URL", "http://sp.test/search.json")
+    monkeypatch.setattr(appmod, "BD_KEY", "")
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+    monkeypatch.setattr(appmod, "API_KEY", "")
+    monkeypatch.setitem(appmod.CONFIG, "cache_db", str(tmp_path / "usage.db"))
+    monkeypatch.setitem(appmod.CONFIG, "provider_quotas",
+                        {"serpapi": {"per_day": 1}})
+    patch_get(monkeypatch, FakeResp(payload={"organic_results": []}))
+    assert client.get("/api/search?q=a&engine=google").status_code == 200
+    r = client.get("/api/search?q=b&engine=google")
+    assert r.status_code == 429
+    assert "daily quota" in r.get_json()["error"]
+
+
+def test_serpapi_images_shape(client, monkeypatch):
+    _serp_env(monkeypatch)
+    monkeypatch.setattr(appmod, "SEARXNG_URL", "")
+    patch_get(monkeypatch, FakeResp(payload={"images_results": [
+        {"title": "Fuji", "link": "https://wiki/fuji",
+         "thumbnail": "https://gstatic/t.jpg", "original": "https://upload/fuji.jpg",
+         "source": "Wikipedia"},
+    ]}))
+    body = client.get("/api/search?q=fuji&engine=google&tab=images").get_json()
+    r0 = body["results"][0]
+    assert r0["origin"] == "https://upload/fuji.jpg"   # direct image for lightbox
+    assert r0["thumb"] == "https://gstatic/t.jpg"      # cheap grid thumbnail
+    assert r0["url"] == "https://wiki/fuji"            # source page

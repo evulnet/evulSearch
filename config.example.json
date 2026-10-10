@@ -1,6 +1,15 @@
 {
   "cache_hours": 168,
   "cache_hours_news": -1,
-  "cache_db": "evulsearch.db",
-  "allow_map_embed": true
+  "cache_db": "search_cache.db",
+  "allow_map_embed": true,
+  "engine_priority": {
+    "google": ["serpapi", "brightdata"],
+    "bing": ["brightdata"],
+    "brave": ["brave"],
+    "searxng": ["searxng"]
+  },
+  "provider_quotas": {
+    "serpapi": {"per_day": 20, "per_month": 100}
+  }
 }

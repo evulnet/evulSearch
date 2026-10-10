@@ -111,6 +111,31 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   parse only; lcl carries ~15MB-equivalent base64 place photos (no documented
   exclusion flag) -> ~60-90s scrapes, BD timeout 120s, mitigated by the query
   cache on repeats.
+- **Admin provider levers (config.json, user decision 2026-10):**
+  `engine_priority` = per-engine provider order (omitted provider = disabled
+  for that engine; `[]` disables the engine and hides its pill) and
+  `provider_quotas` = `{provider: {per_day, per_month}}` UTC-reset budgets
+  counted in the `provider_usage` table of cache_db (counts only, never query
+  text; sqlite reuse is deliberate — no new file sprawl). Quota exhaustion
+  FALLS THROUGH to the next covering provider (rich-but-metered degrades to
+  cheap, never errors if a fallback exists; all-capped -> 429 naming quotas).
+  Cache hits never bump usage (placement of usage_bump after cache_get is
+  load-bearing). engines_available() reflects priority/disable state but NOT
+  live quota (pills would flicker mid-day). Cleaners `_clean_priority`/
+  `_clean_quotas` harden config.json; missing BRAVE key is now per-engine 503
+  (old global 500 guard removed — providers can be brave-less legitimately).
+- **SerpApi shapes (LIVE-VERIFIED 2026-10, free plan):** web `organic_results`,
+  news `news_results` (fallback `organic_results`), images `images_results`
+  (`original` = direct URL, `thumbnail` = gstatic proxy), places = engine
+  google + `fetch_place_results=true` -> `local_results.places[]` with
+  `gps_coordinates` + `links{website,phone}` + `hours` + `thumbnail_large`
+  (SerpApi's own `thumbnail` URL expires — use thumbnail_large). The
+  `google_locations` ENGINE is NOT on this plan (400 Unsupported) — do not
+  switch back. BrightData lcl has NO coordinates (verified) — SerpApi is the
+  only Google-provider route to map pins; frontend map keys off coordinates
+  presence, provider-agnostic by design.
+- **SearXNG LIVE on the LAN** (URL lives in `.env` `SEARXNG_URL` only; instance has json format enabled — never write the IP into tracked files);
+  images entries often have empty `thumbnail` -> mapper falls back to img_src.
 - **Answers = multi-backend (user decision 2026-10):** `/api/answer` takes
   `engine: brave|local`; both speak OpenAI chat-completions so the parse
   (choices[0].message.content + citations) and the safe-markdown renderer are
@@ -187,12 +212,10 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
 - Repo **public**; account `nkavassalis`; single-maintainer flow: direct push to `main` after full green suite (no branch-and-PR).
 - Bright Data SERP path is LIVE-VERIFIED end-to-end (configured zone):
   Google web/news/places and Bing web all returned real results through the
-  proxy. SerpApi and SearXNG providers exist and are MOCK-verified only —
-  live checks await the user's SERPAPI_KEY / a SEARXNG instance (SerpApi shapes
-  implemented from docs: organic_results/news_results/inline_images (full-res
-  URL rides in `thumbnail`)/places(location_info.coordinates); SearXNG 403 =
-  json format disabled). Bright Data Places carry NO coordinates (verified
-  live) — SerpApi/Brave enable the map, BrightData cannot; the frontend map is
-  provider-agnostic (renders on coordinates presence). Safe-search `off`/`strict` flags for Google/Bing are unit-verified
+  proxy. SerpApi (key) and SearXNG (LAN instance) are LIVE-VERIFIED end to end
+  (web/images/places; shapes recorded above). Bright Data Places carry NO
+  coordinates (verified live) — SerpApi/Brave enable the map, BrightData
+  cannot; the frontend map is provider-agnostic (renders on coordinates
+  presence). Safe-search `off`/`strict` flags for Google/Bing are unit-verified
   only (URL construction). Not verified: Bing freshness (unmapped by design),
   Bing market/locale defaults (returned US-flavored results from this host).

@@ -91,19 +91,19 @@ def make_mock_brave():
                 {"title": f"SerpApi news for {q}", "link": "https://sp.example/n1",
                  "snippet": "sn", "source": "sp.example", "date": "1 hour ago"}])
         if eng == "google_images":
-            return jsonify(inline_images=[
+            return jsonify(images_results=[
                 {"title": f"SerpApi image {q}", "link": "https://sp.example/p1",
-                 "thumbnail": "https://sp.example/i1.jpg", "source": "sp.example"}])
-        if eng == "google_locations":
-            return jsonify(places=[
+                 "thumbnail": "https://sp.example/i1.jpg",
+                 "original": "https://sp.example/full.jpg", "source": "sp.example"}])
+        if qs.get("fetch_place_results", [""])[0] == "true":
+            # verified shape 2026-10: local_results.places[] + gps_coordinates
+            return jsonify(local_results={"places": [
                 {"title": f"SerpApi place for {q}", "address": "1 Osaka road",
-                 "website": "https://sp.example",
+                 "links": {"website": "https://sp.example", "phone": "tel:+81 00"},
                  "phone": "+81 00-0000", "rating": 4.4, "reviews": 240,
-                 "type": "sushi",
-                 "location_info": {"coordinates": {"latitude": 34.7,
-                                                    "longitude": 135.5}}}])
-        if eng == "duckduckgo":
-            return jsonify(organic_results=[])
+                 "type": "sushi", "hours": "Closes 11 PM",
+                 "thumbnail_large": "https://sp.example/big.jpg",
+                 "gps_coordinates": {"latitude": 34.7, "longitude": 135.5}}]})
         return jsonify(organic_results=[
             {"title": f"SerpApi result for {q}", "link": "https://sp.example/1",
              "snippet": "serp &amp; one", "displayed_link": "sp.example"},
