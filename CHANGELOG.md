@@ -6,12 +6,15 @@ Format: latest first; sections `Added / Changed / Fixed`.
 ## Unreleased — 2026-10 (mobile & branding)
 
 ### Added
-- **Per-query-type engine memory.** Each tab now remembers its own last-used
-  engine in browser localStorage (`settings.engines`), so picking Kagi for
-  News no longer overrides Google for Web. An untouched tab falls back to the
-  first engine that serves it; a shared `?engine=` link pins just that search
-  without touching the stored choice. A legacy single-engine preference is
-  migrated into the per-tab map on first load.
+- **Per-query-type engine memory + `engine_scope` lever.** Engine choices
+  persist per query type in browser localStorage (`settings.engines`); a
+  legacy single-engine preference migrates on first load. The new
+  `config.json` lever decides what a pill click remembers: `"everywhere"`
+  (default) applies the pick to every tab that engine covers — click Google
+  once and News/Images/Places follow — while `"tab"` keeps every tab's
+  choice independent. Untouched tabs fall back to the first engine that
+  serves them; a shared `?engine=` link pins just that one search and never
+  touches stored memory.
 
 ### Added
 - Favicon: “evil magnifier” mark in SVG (`static/favicon.svg`) plus PNG

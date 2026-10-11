@@ -3,6 +3,7 @@
   "cache_hours_news": -1,
   "cache_db": "search_cache.db",
   "allow_map_embed": true,
+  "engine_scope": "everywhere",
   "engine_priority": {
     "brave": ["brave"],
     "kagi": ["kagi"],

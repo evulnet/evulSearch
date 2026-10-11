@@ -166,6 +166,11 @@ def test_load_config_defaults(tmp_path, monkeypatch):
     c = appmod.load_config()
     assert c["cache_hours"] == 168 and c["cache_hours_news"] == -1
     assert c["allow_map_embed"] is False  # explicit opt-out honored
+    assert c["engine_scope"] == "everywhere"  # fan-out is the default
+    cfg.write_text('{"engine_scope": "tab"}')
+    assert appmod.load_config()["engine_scope"] == "tab"
+    cfg.write_text('{"engine_scope": "sideways"}')
+    assert appmod.load_config()["engine_scope"] == "everywhere"  # garbage falls back
 
 
 def test_answer_cached(client, monkeypatch, tmp_path):
@@ -279,6 +284,12 @@ def test_config_endpoint(client, monkeypatch):
     monkeypatch.setitem(appmod.CONFIG, "allow_map_embed", True)
     body = client.get("/api/config").get_json()
     assert body["answers_enabled"] is False and body["map_embed_allowed"] is True
+
+
+def test_config_exposes_engine_scope(client, monkeypatch):
+    assert client.get("/api/config").get_json()["engine_scope"] == "everywhere"
+    monkeypatch.setitem(appmod.CONFIG, "engine_scope", "tab")
+    assert client.get("/api/config").get_json()["engine_scope"] == "tab"
 
 
 def test_config_engines_reflect_keys(client, monkeypatch):

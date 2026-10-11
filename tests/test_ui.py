@@ -505,14 +505,13 @@ def test_engine_switch(browser, app_server):
     page.press("#q", "Enter")
     expect(page.locator("#results li").first).to_contain_text("SerpApi news for hello")
 
-    # Places: tab has its OWN memory (web/news picked google but places was
-    # never clicked) -> falls back to first coverer = Brave…
+    # Places: Google was picked on Web/News, and under the default
+    # "everywhere" scope Google (which also covers Places) was remembered
+    # there too — no re-pick needed, and it carries coordinates -> map+pins
     page.click('#tabs button[data-tab="places"]')
     expect(page.locator("#engines button")).to_have_count(2)
-    page.press("#q", "Enter")
-    expect(page.locator("#results li.place").first).to_contain_text("Pizza place for hello")
-    # …and picking Google now remembers it for Places only
-    page.click('#engines button[data-engine="google"]')
+    expect(page.locator('#engines button[data-engine="google"]'))\
+        .to_have_class(re.compile("active"))
     page.press("#q", "Enter")
     expect(page.locator("#results li.place").first).to_contain_text("SerpApi place for hello")
     expect(page.locator("#map")).to_be_visible()
@@ -567,6 +566,56 @@ def test_engine_memory_migrates_legacy_pref(browser, app_server):
     # legacy keys must be gone from storage (migration is one-way)
     assert page.evaluate(
         "JSON.parse(localStorage.getItem('settings')).engine") is None
+    ctx.close()
+
+
+def test_engine_scope_everywhere_fans_out(browser, app_server):
+    # default lever: a pill click is remembered for EVERY tab the engine
+    # covers — and ONLY those (Kagi has no Places, so Places must not move).
+    ctx = browser.new_context()
+    ctx.add_init_script(FAKE_LEAFLET)  # fanned-out SerpApi places carry coords
+    page = ctx.new_page()
+    page.goto(app_server + "/")
+    page.fill("#q", "hello")
+    page.click('#engines button[data-engine="google"]')
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_contain_text("SerpApi result for hello")
+    # Places covered by Google -> already Google (SerpApi place, map renders)
+    page.click('#tabs button[data-tab="places"]')
+    page.press("#q", "Enter")
+    expect(page.locator("#results li.place").first).to_contain_text("SerpApi place for hello")
+    # Kagi on News: covers web/news/images but NOT Places…
+    page.click('#tabs button[data-tab="news"]')
+    page.click('#engines button[data-engine="kagi"]')
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_contain_text("Kagi news for hello")
+    # …so Places still remembers Google
+    page.click('#tabs button[data-tab="places"]')
+    expect(page.locator('#engines button[data-engine="google"]'))\
+        .to_have_class(re.compile("active"))
+    ctx.close()
+
+
+def test_engine_scope_tab_leaves_tabs_independent(browser, app_server_tab_scope):
+    # lever "tab": the pill click changes ONLY the clicked tab, everywhere
+    # else keeps its own fallback/pref (strict per-tab independence).
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    page.goto(app_server_tab_scope + "/")
+    page.fill("#q", "hello")
+    page.click('#engines button[data-engine="google"]')
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_contain_text("SerpApi result for hello")
+    page.click('#tabs button[data-tab="places"]')
+    expect(page.locator('#engines button[data-engine="brave"]'))\
+        .to_have_class(re.compile("active"))
+    page.press("#q", "Enter")
+    expect(page.locator("#results li.place").first).to_contain_text("Pizza place for hello")
+    # clicking Brave back on Web does not drag Places along either
+    page.click('#tabs button[data-tab="web"]')
+    page.click('#engines button[data-engine="brave"]')
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_contain_text("Web result for hello")
     ctx.close()
 
 

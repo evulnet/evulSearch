@@ -132,6 +132,7 @@ for (const key of Object.keys(DEFAULTS)) {
 // --- Tabs ---
 const tabsEl = $("tabs");
 let serverCaps = { answers_enabled: false,
+                   engine_scope: "everywhere",
                    engines: [{ id: "brave", tabs: ["web", "news", "images", "places", "answers"] }] };
 let currentTab = "web";
 
@@ -168,6 +169,19 @@ function engineForRequest(tab) {
   return enginePick(urlEngine[tab] || settings.engines[tab], enginesFor(tab));
 }
 
+// What a pill click REMEMBERS. Answers is always its own slot. For search
+// engines the server lever `engine_scope` decides: "everywhere" fans the
+// pick across every tab the engine covers; "tab" touches only this tab.
+function applyEngineChoice(engine, isAns) {
+  const fanOut = !isAns && serverCaps.engine_scope === "everywhere"
+    && Array.isArray(engine.tabs) && engine.tabs.length;
+  const targets = fanOut ? engine.tabs : [isAns ? "answers" : currentTab];
+  for (const t of targets) {
+    settings.engines[t] = engine.id;
+    delete urlEngine[t];            // explicit choice outranks a URL pin
+  }
+}
+
 function buildEngines() {
   const row = $("engines");
   row.innerHTML = "";
@@ -183,9 +197,7 @@ function buildEngines() {
     b.textContent = e.label || ENGINE_LABELS[e.id] || e.id;
     b.classList.toggle("active", e.id === active);
     b.addEventListener("click", () => {
-      const tab = isAns ? "answers" : currentTab;
-      settings.engines[tab] = e.id;   // per-tab memory
-      delete urlEngine[tab];          // explicit choice outranks a URL pin
+      applyEngineChoice(e, isAns);
       saveSettings(settings);
       buildEngines();
       flashSave(document.querySelector(`#engines button[data-engine="${e.id}"]`) || row);

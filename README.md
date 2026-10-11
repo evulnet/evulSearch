@@ -20,11 +20,14 @@ no backend can serve hide themselves. **More backend APIs will follow**; an
 engine is a capability line plus a URL builder and a mapper, and adding one
 means touching none of the others.
 
-Your engine choice is remembered **per query type**: pick Kagi for News and
-Google for Images and each tab keeps its own last-used pill (in browser
-localStorage — never the server). A tab you've never chosen falls back to the
-first engine that can serve it, and a shared `?engine=` deep link applies to
-that one search without disturbing what's stored.
+Your engine choice is remembered **per query type** in browser localStorage
+(never the server). By default a pill click applies to **every tab that
+engine can serve** — pick Google once and News/Images/Places follow, while
+each tab still remembers independently (choose Kagi for News only and Places
+stays Google). Set `"engine_scope": "tab"` in `config.json` for a deployment
+where every tab is chosen independently. A tab you've never chosen falls back
+to the first engine that can serve it, and a shared `?engine=` deep link
+applies to that one search without disturbing what's stored.
 
 | Engine | Providers (best-first) | Web | News | Images | Places | Answers |
 |---|---|---|---|---|---|---|
@@ -152,6 +155,7 @@ Copy `config.example.json` to `config.json` (gitignored) to change behavior:
 | `cache_db` | `evulsearch.db` | Path of the SQLite cache file (relative to `app.py` unless absolute). Also holds the `provider_usage` quota counters when quotas are configured (counts only — never query text) |
 | `engine_priority` | built-in order | Provider order per engine; omit a provider to disable it for that engine, use `[]` to disable the engine. See [Provider levers](#provider-levers-priority--quotas) |
 | `provider_quotas` | off | Call budgets per provider, e.g. `{"serpapi": {"per_day": 20, "per_month": 100}}`. UTC resets; exhausted providers fall through to the next provider. See [Provider levers](#provider-levers-priority--quotas) |
+| `engine_scope` | `everywhere` | What an engine-pill click remembers. `everywhere`: the choice applies to every tab that engine can serve (Places follows when you pick Google on Web). `tab`: each tab's choice is independent — clicking one tab never moves the others. Any other value falls back to `everywhere` |
 
 If `config.json` is missing or invalid, defaults apply. Restart the server
 after editing.

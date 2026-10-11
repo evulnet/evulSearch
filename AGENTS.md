@@ -83,19 +83,25 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   `ui_scale` (75/100/125/150, default 100) applies CSS `zoom` on `<html>` via
   `applyZoom()` — keep it clamped to the whitelist; `for key of DEFAULTS`
   wiring auto-persists any setting whose control id matches the key.
-- **Per-tab engine memory (user decision 2026-10):** the remembered engine is
-  `settings.engines = {tab: id}` (localStorage), NOT a single global.
-  `engineForRequest(tab)`/`engineForAnswers` resolve via `enginePick(pref,
-  covering)`: URL pin (transient `urlEngine[tab]`, never persisted) > that
-  tab's stored id > first covering engine. A pill click writes
-  `settings.engines[currentTab]` and clears that tab's `urlEngine` pin.
-  `loadSettings` migrates a legacy global `engine`/`answers_engine` into the
-  map ONCE and re-saves (self-heal); `?engine=` deep links are applied via
-  `applyEngineFromUrl` into `urlEngine` only. The generic `for key of
-  Object.keys(DEFAULTS)` settings loops MUST skip `engines` (it's an object,
-  and `#engines` is the pill row DIV, not a control) — both loops now guard
-  `if (!el || el.tagName === "DIV") continue;`; keep that guard or the pill
-  row gets settings plumbing bound to it.
+- **Engine memory + `engine_scope` lever (user decision 2026-10, twice):**
+  the remembered engine is `settings.engines = {tab: id}` (localStorage),
+  NOT a single global. `engineForRequest(tab)`/`engineForAnswers` resolve
+  via `enginePick(pref, covering)`: URL pin (transient `urlEngine[tab]`,
+  never persisted) > that tab's stored id > first covering engine.
+  A pill click runs `applyEngineChoice(engine, isAns)` in app.js: the
+  server lever `engine_scope` (config.json, exposed via /api/config,
+  normalized to tab|everywhere, DEFAULT "everywhere") decides fan-out —
+  "everywhere" writes the id to EVERY tab in that engine's capability
+  `tabs` (never answers: answers_backends carry no tabs), "tab" writes
+  only the clicked tab; either way that tab's `urlEngine` pin is cleared.
+  `loadSettings` migrates a legacy global `engine`/`answers_engine` into
+  the map ONCE and re-saves (self-heal); `?engine=` deep links land in
+  `urlEngine` only. The generic `for key of Object.keys(DEFAULTS)` loops
+  MUST skip `engines` (object value; `#engines` is the pill row DIV, not a
+  control) — both loops guard `if (!el || el.tagName === "DIV") continue;`
+  or settings plumbing binds to the pill row. UI fixtures: `app_server`
+  (default lever) and `app_server_tab_scope` ("tab") both go through
+  `_start_app(mock_brave, tmp_path_factory, extra_cfg)` in conftest.
 - **Engine modularity (user decision 2026-10):** search backends are a
   capability registry, not conditionals. `app.py`: `BRAVE_CAPS` / `BD_CAPS`
   map engine id -> tabs it serves; `engines_available()` builds `/api.config

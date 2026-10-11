@@ -131,6 +131,12 @@ def load_config():
         # Third-party map tiles: served by default (double opt-OUT: set
         # allow_map_embed=false on the server AND/OR uncheck the user cog).
         "allow_map_embed": bool(cfg.get("allow_map_embed", True)),
+        # Where an engine-pill click is remembered: "everywhere" (default) fans
+        # the choice out to every tab that engine can serve; "tab" keeps each
+        # tab independent (only the tab you clicked changes).
+        "engine_scope": (cfg.get("engine_scope")
+                         if cfg.get("engine_scope") in ("tab", "everywhere")
+                         else "everywhere"),
         # Admin levers: per-engine provider priority (cost vs richness) and
         # per-provider call quotas (UTC day/month, counted in the SQLite db).
         "engine_priority": _clean_priority(cfg.get("engine_priority")),
@@ -1216,6 +1222,7 @@ def config():
     return jsonify(answers_enabled=bool(answers_backends()),
                    answers_backends=answers_backends(),
                    map_embed_allowed=CONFIG.get("allow_map_embed", True),
+                   engine_scope=CONFIG.get("engine_scope", "everywhere"),
                    engines=engines_available())
 
 

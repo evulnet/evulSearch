@@ -295,14 +295,37 @@ def mock_brave():
 
 @pytest.fixture(scope="session")
 def app_server(mock_brave, tmp_path_factory):
+    url, proc = _start_app(mock_brave, tmp_path_factory, {})
+    try:
+        yield url
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+@pytest.fixture(scope="session")
+def app_server_tab_scope(mock_brave, tmp_path_factory):
+    # same stack, but the admin chose strict per-tab engine memory
+    url, proc = _start_app(mock_brave, tmp_path_factory,
+                           {"engine_scope": "tab"})
+    try:
+        yield url
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def _start_app(mock_brave, tmp_path_factory, extra_cfg):
     import os
     import time
     import urllib.request
     # hermetic config: cache off, db in tmp (never touches the developer's files)
     cfg = tmp_path_factory.mktemp("cfg") / "config.json"
-    cfg.write_text(json.dumps({"cache_hours": -1, "cache_hours_news": -1,
-                               "allow_map_embed": True,
-                               "cache_db": str(cfg.parent / "ui-tests.db")}))
+    base = {"cache_hours": -1, "cache_hours_news": -1,
+            "allow_map_embed": True,
+            "cache_db": str(cfg.parent / "ui-tests.db")}
+    base.update(extra_cfg)
+    cfg.write_text(json.dumps(base))
     port = _free_port()
     env = {
         **os.environ,
@@ -336,7 +359,7 @@ def app_server(mock_brave, tmp_path_factory):
                 break
             except Exception:
                 time.sleep(0.1)
-        yield f"http://127.0.0.1:{port}"
-    finally:
+        return f"http://127.0.0.1:{port}", proc
+    except Exception:
         proc.terminate()
-        proc.wait(timeout=5)
+        raise
