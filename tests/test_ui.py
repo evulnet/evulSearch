@@ -505,9 +505,14 @@ def test_engine_switch(browser, app_server):
     page.press("#q", "Enter")
     expect(page.locator("#results li").first).to_contain_text("SerpApi news for hello")
 
-    # Places: Brave + Google(SerpApi) -> real coordinates -> map + pins
+    # Places: tab has its OWN memory (web/news picked google but places was
+    # never clicked) -> falls back to first coverer = Brave…
     page.click('#tabs button[data-tab="places"]')
     expect(page.locator("#engines button")).to_have_count(2)
+    page.press("#q", "Enter")
+    expect(page.locator("#results li.place").first).to_contain_text("Pizza place for hello")
+    # …and picking Google now remembers it for Places only
+    page.click('#engines button[data-engine="google"]')
     page.press("#q", "Enter")
     expect(page.locator("#results li.place").first).to_contain_text("SerpApi place for hello")
     expect(page.locator("#map")).to_be_visible()
@@ -527,7 +532,41 @@ def test_engine_switch(browser, app_server):
     page.click('#engines button[data-engine="searxng"]')
     page.press("#q", "Enter")
     expect(page.locator("#results li").first).to_contain_text("SearXNG result for hello")
+
+    # Persistence: plain reload (no URL engine pin) restores each tab's own
+    # memory — Web kept SearXNG, Places kept Google/SerpApi.
+    page.goto(app_server + "/")
+    expect(page.locator('#engines button[data-engine="searxng"]'))\
+        .to_have_class(re.compile("active"))
+    page.fill("#q", "hello")
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_contain_text("SearXNG result for hello")
+    page.click('#tabs button[data-tab="places"]')
+    expect(page.locator('#engines button[data-engine="google"]'))\
+        .to_have_class(re.compile("active"))
     assert not errors
+    ctx.close()
+
+
+def test_engine_memory_migrates_legacy_pref(browser, app_server):
+    # pre-per-tab users had one global engine (google) + answers default:
+    # every tab must remember google after the migration, nothing re-picked
+    ctx = browser.new_context()
+    ctx.add_init_script("localStorage.setItem('settings', JSON.stringify("
+                       "{engine: 'google', answers_engine: 'brave'}));")
+    page = ctx.new_page()
+    page.goto(app_server + "/")
+    expect(page.locator('#engines button[data-engine="google"]'))\
+        .to_have_class(re.compile("active"))
+    page.fill("#q", "hello")
+    page.press("#q", "Enter")
+    expect(page.locator("#results li").first).to_contain_text("SerpApi result for hello")
+    page.click('#tabs button[data-tab="news"]')
+    expect(page.locator('#engines button[data-engine="google"]'))\
+        .to_have_class(re.compile("active"))
+    # legacy keys must be gone from storage (migration is one-way)
+    assert page.evaluate(
+        "JSON.parse(localStorage.getItem('settings')).engine") is None
     ctx.close()
 
 

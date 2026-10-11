@@ -20,6 +20,12 @@ no backend can serve hide themselves. **More backend APIs will follow**; an
 engine is a capability line plus a URL builder and a mapper, and adding one
 means touching none of the others.
 
+Your engine choice is remembered **per query type**: pick Kagi for News and
+Google for Images and each tab keeps its own last-used pill (in browser
+localStorage — never the server). A tab you've never chosen falls back to the
+first engine that can serve it, and a shared `?engine=` deep link applies to
+that one search without disturbing what's stored.
+
 | Engine | Providers (best-first) | Web | News | Images | Places | Answers |
 |---|---|---|---|---|---|---|
 | Brave | Brave Search API (native) | ✅ | ✅ | ✅ | ✅ | ✅ (own key) |

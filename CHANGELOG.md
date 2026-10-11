@@ -6,6 +6,14 @@ Format: latest first; sections `Added / Changed / Fixed`.
 ## Unreleased — 2026-10 (mobile & branding)
 
 ### Added
+- **Per-query-type engine memory.** Each tab now remembers its own last-used
+  engine in browser localStorage (`settings.engines`), so picking Kagi for
+  News no longer overrides Google for Web. An untouched tab falls back to the
+  first engine that serves it; a shared `?engine=` link pins just that search
+  without touching the stored choice. A legacy single-engine preference is
+  migrated into the per-tab map on first load.
+
+### Added
 - Favicon: “evil magnifier” mark in SVG (`static/favicon.svg`) plus PNG
   renditions (`favicon-32.png`, `favicon-192.png`, `apple-touch-icon.png`,
   rasterized from the SVG via headless Chromium). Safari supports no SVG

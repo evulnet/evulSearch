@@ -83,6 +83,19 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
   `ui_scale` (75/100/125/150, default 100) applies CSS `zoom` on `<html>` via
   `applyZoom()` — keep it clamped to the whitelist; `for key of DEFAULTS`
   wiring auto-persists any setting whose control id matches the key.
+- **Per-tab engine memory (user decision 2026-10):** the remembered engine is
+  `settings.engines = {tab: id}` (localStorage), NOT a single global.
+  `engineForRequest(tab)`/`engineForAnswers` resolve via `enginePick(pref,
+  covering)`: URL pin (transient `urlEngine[tab]`, never persisted) > that
+  tab's stored id > first covering engine. A pill click writes
+  `settings.engines[currentTab]` and clears that tab's `urlEngine` pin.
+  `loadSettings` migrates a legacy global `engine`/`answers_engine` into the
+  map ONCE and re-saves (self-heal); `?engine=` deep links are applied via
+  `applyEngineFromUrl` into `urlEngine` only. The generic `for key of
+  Object.keys(DEFAULTS)` settings loops MUST skip `engines` (it's an object,
+  and `#engines` is the pill row DIV, not a control) — both loops now guard
+  `if (!el || el.tagName === "DIV") continue;`; keep that guard or the pill
+  row gets settings plumbing bound to it.
 - **Engine modularity (user decision 2026-10):** search backends are a
   capability registry, not conditionals. `app.py`: `BRAVE_CAPS` / `BD_CAPS`
   map engine id -> tabs it serves; `engines_available()` builds `/api.config

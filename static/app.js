@@ -6,17 +6,30 @@ const DEFAULTS = {
   enabled_answers: true, answers_freshness: "any",
   enabled_news: true, enabled_images: true, enabled_places: true,
   places_location: false, places_preset: "", map_embed: true, ui_scale: 100,
-  engine: "brave", answers_engine: "brave",
+  engines: {},   // per-tab memory: {web:"google", news:"kagi", answers:"local", ...}
 };
 
 const $ = (id) => document.getElementById(id);
 
 function loadSettings() {
+  let s;
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
+    s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
   } catch {
-    return { ...DEFAULTS };
+    s = { ...DEFAULTS };
   }
+  // one-time migration: a legacy global engine pref becomes that engine for
+  // every tab it could have served (unsupported picks fall through at read)
+  if (s.engine || s.answers_engine) {
+    s.engines = Object.assign({
+      web: s.engine, news: s.engine, images: s.engine, places: s.engine,
+      answers: s.answers_engine,
+    }, s.engines || {});
+    delete s.engine;
+    delete s.answers_engine;
+    saveSettings(s);  // persist the migration once; storage self-heals
+  }
+  return s;
 }
 
 function saveSettings(s) {
@@ -61,7 +74,9 @@ const overlay = $("settings-overlay");
 function openSettings() {
   for (const key of Object.keys(DEFAULTS)) {
     const el = $(key);
-    if (!el) continue;  // no control for this setting (e.g. engine pills)
+    // guard: `engines` collides with the #engines pill ROW (a div, no
+    // value); delegated pill 'change' events need the same input check
+    if (!el || el.tagName === "DIV") continue;
     if (el.type === "checkbox") el.checked = Boolean(settings[key]);
     else el.value = String(settings[key]);
   }
@@ -95,9 +110,12 @@ overlay.addEventListener("click", (e) => {
 });
 
 for (const key of Object.keys(DEFAULTS)) {
-  if (!$(key)) continue;  // settings without a control (e.g. engine pills)
-  $(key).addEventListener("change", () => {
-    const el = $(key);
+  const ctl = $(key);
+  // see above: never bind settings plumbing to the #engines pill row
+  if (!ctl || ctl.tagName === "DIV") continue;
+  ctl.addEventListener("change", () => {
+    const el = ctl;
+    if (el.tagName !== "INPUT" && el.tagName !== "SELECT") return;
     if (el.type === "checkbox") settings[key] = el.checked;
     else if (key === "count") settings[key] = Number(el.value);
     else settings[key] = el.value;
@@ -130,17 +148,24 @@ function answersBackends() {
   return serverCaps.answers_backends || [];
 }
 
+// Deep links may pin an engine at runtime; it NEVER touches the stored
+// per-tab memory (settings.engines) and yields to the next explicit click.
+let urlEngine = {};
+
+function enginePick(pref, covering) {
+  const hit = covering.find(e => e.id === pref);
+  if (hit) return hit.id;
+  const first = covering[0];  // e.g. Brave-less server: never send an unconfigured id
+  return first ? first.id : "brave";
+}
+
 function engineForAnswers() {
-  const id = settings.answers_engine;
-  if (answersBackends().some(e => e.id === id)) return id;
-  return answersBackends()[0] ? answersBackends()[0].id : "brave";
+  return enginePick(urlEngine.answers || settings.engines.answers,
+                    answersBackends());
 }
 
 function engineForRequest(tab) {
-  const id = settings.engine;
-  if (enginesFor(tab).some(e => e.id === id)) return id;
-  const first = enginesFor(tab)[0];  // e.g. Brave-less server: never send an unconfigured id
-  return first ? first.id : "brave";
+  return enginePick(urlEngine[tab] || settings.engines[tab], enginesFor(tab));
 }
 
 function buildEngines() {
@@ -158,8 +183,9 @@ function buildEngines() {
     b.textContent = e.label || ENGINE_LABELS[e.id] || e.id;
     b.classList.toggle("active", e.id === active);
     b.addEventListener("click", () => {
-      if (isAns) settings.answers_engine = e.id;
-      else settings.engine = e.id;
+      const tab = isAns ? "answers" : currentTab;
+      settings.engines[tab] = e.id;   // per-tab memory
+      delete urlEngine[tab];          // explicit choice outranks a URL pin
       saveSettings(settings);
       buildEngines();
       flashSave(document.querySelector(`#engines button[data-engine="${e.id}"]`) || row);
@@ -814,11 +840,12 @@ function tabFromUrl(p) {
 
 function applyEngineFromUrl(p) {
   // Deep links may pin the engine (e.g. /?q=x&tab=web&engine=google); runtime
-  // only - the user's stored preference is left untouched.
+  // only - the user's stored per-tab memory is left untouched.
   const e = p.get("engine");
   if (!e) return;
-  if ((serverCaps.engines || []).some(x => x.id === e)) settings.engine = e;
-  if ((serverCaps.answers_backends || []).some(x => x.id === e)) settings.answers_engine = e;
+  const tab = tabFromUrl(p);
+  if ((serverCaps.engines || []).some(x => x.id === e)) urlEngine[tab] = e;
+  if ((serverCaps.answers_backends || []).some(x => x.id === e)) urlEngine.answers = e;
 }
 
 window.addEventListener("popstate", () => {
