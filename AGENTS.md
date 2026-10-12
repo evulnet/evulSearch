@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project mode
-REAL — GitHub-hosted, tested, documented. Push target: **private** repo `nkavassalis/evulSearch` (verify `gh auth status` shows `nkavassalis` before pushing). All unit + Playwright tests must pass before any push. Local `.git/hooks/pre-push` guard from the SIMPLE era was removed on promotion; do not reintroduce remotes other than `origin`.
+REAL — GitHub-hosted, tested, documented. Push target: **public** repo `evulnet/evulSearch` (transferred from `nkavassalis/evulSearch` 2026-10; verify `gh auth status` shows `nkavassalis`, an admin of the `evulnet` org, before pushing). All unit + Playwright tests must pass before any push. Local `.git/hooks/pre-push` guard from the SIMPLE era was removed on promotion; do not reintroduce remotes other than `origin`.
 
 ## Purpose
 evulSearch: a small self-hosted, privacy-focused search service. A Flask server proxies Brave Search APIs (and optionally Bright Data SERP for Google/Bing) so API keys never reach the browser. Intended for private networks only (e.g. served over WireGuard); the app itself must never be exposed publicly. UI state lives in browser localStorage; the server keeps no state or logs.
@@ -311,15 +311,18 @@ HOST=0.0.0.0 .venv/bin/python app.py         # private-network/LAN test bind
 
 ## Guardrails in effect
 
-- The GitHub repo is **PUBLIC** (nkavassalis/evulSearch, since 2026-10, launched
-  from a single squashed initial commit — keep history clean; never force-push
-  secrets or internal paths, and treat every commit as world-readable forever).
+- The GitHub repo is **PUBLIC** (evulnet/evulSearch; launched under
+  nkavassalis 2026-10 from a single squashed initial commit, transferred to
+  the evulnet org the same month — keep history clean; never force-push
+  secrets or internal paths, and treat every commit as world-readable forever.
+  The old `nkavassalis/evulSearch` URL redirects here while the old name
+  stays unclaimed).
 - The *application* must still never be publicly exposed (Flask dev server,
   no auth): private networks only.
 - Never commit `.env`, `config.json`, `*.db`, real IPs/hostnames/zone names,
   or anything matching the secret-scan patterns in AGENTS. Docs describe
   setup abstractly (`DATABASE_URL`-style placeholders only).
-- Repo **public**; account `nkavassalis`; single-maintainer flow: direct push to `main` after full green suite (no branch-and-PR).
+- Repo **public**; org `evulnet` (maintainer account `nkavassalis`, org admin); single-maintainer flow: direct push to `main` after full green suite (no branch-and-PR).
 - Bright Data SERP path is LIVE-VERIFIED end-to-end (configured zone):
   Google web/news/places and Bing web all returned real results through the
   proxy. SerpApi (key) and SearXNG (LAN instance) are LIVE-VERIFIED end to end
